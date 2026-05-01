@@ -12,10 +12,12 @@ from io import BytesIO
 import requests
 import threading
 import webbrowser
+from urllib.parse import quote
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 import logging
 import signal
+import win32clipboard
 
 # Import for hotkey functionality
 try:
@@ -317,6 +319,37 @@ def update_settings(updates: dict, delete_keys: list = None):
         logging.error("Failed to update settings: %s", e)
 
 
+def get_clipboard_text():
+    try:
+        win32clipboard.OpenClipboard()
+        if win32clipboard.IsClipboardFormatAvailable(win32clipboard.CF_UNICODETEXT):
+            return win32clipboard.GetClipboardData(win32clipboard.CF_UNICODETEXT)
+        return None
+    except Exception:
+        return None
+    finally:
+        try:
+            win32clipboard.CloseClipboard()
+        except Exception:
+            pass
+
+
+def watch_clipboard_for_jpdb(baseline_text, timeout=60):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if os.path.exists(EXIT_WATCHDOG):
+            break
+        text = get_clipboard_text()
+        if text and text != baseline_text and text.strip():
+            jpdb_url = f"https://jpdb.io/search?q={quote(text.strip())}"
+            logging.info(f"[JPDB] Opening: {jpdb_url}")
+            webbrowser.open_new_tab(jpdb_url)
+            break
+        time.sleep(0.5)
+    else:
+        logging.info("[JPDB] Clipboard watcher timed out after %ds.", timeout)
+
+
 def clipboard_monitor_loop():
     last_snip_running = False
     last_hash = get_settings().get("last_detected_image", "")
@@ -356,33 +389,41 @@ def clipboard_monitor_loop():
                         img.save(output, format="PNG")
                         output.seek(0)
                         files = {
-                            "reqtype": (None, "fileupload"),
-                            "time": (None, "1h"),
-                            "fileToUpload": ("snip.png", output, "image/png"),
+                            "files[]": ("snip.png", output, "image/png"),
                         }
-                        logging.info("[Litterbox] Uploading image...")
+                        logging.info("[Uguu] Uploading image...")
                         try:
                             response = requests.post(
-                                "https://litterbox.catbox.moe/resources/internals/api.php",
+                                "https://uguu.se/upload",
                                 files=files,
                                 timeout=10,
                             )
                             if response.status_code == 200:
-                                url = response.text.strip()
-                                logging.info(f"[Litterbox] Upload success: {url}")
-                                update_settings({"last_litterbox_url": url})
-                                if do_open_lens:
-                                    lens_url = (
-                                        f"https://lens.google.com/uploadbyurl?url={url}"
-                                    )
-                                    logging.info(f"[Google Lens] Opening: {lens_url}")
-                                    webbrowser.open_new_tab(lens_url)
+                                data = response.json()
+                                if data.get("success") and data.get("files"):
+                                    url = data["files"][0]["url"]
+                                    logging.info(f"[Uguu] Upload success: {url}")
+                                    update_settings({"last_upload_url": url})
+                                    if do_open_lens:
+                                        lens_url = (
+                                            f"https://lens.google.com/uploadbyurl?url={url}"
+                                        )
+                                        logging.info(f"[Google Lens] Opening: {lens_url}")
+                                        webbrowser.open_new_tab(lens_url)
+                                        baseline = get_clipboard_text()
+                                        threading.Thread(
+                                            target=watch_clipboard_for_jpdb,
+                                            args=(baseline,),
+                                            daemon=True,
+                                        ).start()
+                                else:
+                                    logging.error(f"[Uguu] Upload failed: {data}")
                             else:
                                 logging.error(
-                                    f"[Litterbox] Upload failed with status: {response.status_code}"
+                                    f"[Uguu] Upload failed with status: {response.text}"
                                 )
                         except Exception as e:
-                            logging.error(f"[Litterbox] Upload error: {e}")
+                            logging.error(f"[Uguu] Upload error: {e}")
                 else:
                     logging.info(
                         "[SnippingTool] No upload or duplicate or not allowed."
