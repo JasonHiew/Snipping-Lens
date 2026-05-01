@@ -1,9 +1,13 @@
-![RisPNG/Snipping-Lens](https://github.com/RisPNG/Snipping-Lens/blob/main/banner.png)
+![JasonHiew/Snipping-Lens](https://github.com/RisPNG/Snipping-Lens/blob/main/banner.png)
 
 <p align="center">
-<a href="https://github.com/RisPNG/Snipping-Lens/stargazers"><img alt="GitHub Repo Stars" src="https://img.shields.io/github/stars/RisPNG/Snipping-Lens?style=flat&color=limegreen"></a>
-<a href="https://github.com/RisPNG/Snipping-Lens"><img alt="GitHub Last Commit" src="https://img.shields.io/github/last-commit/RisPNG/Snipping-Lens?style=flat&color=lightyellow"></a>
+<a href="https://github.com/JasonHiew/Snipping-Lens/stargazers"><img alt="GitHub Repo Stars" src="https://img.shields.io/github/stars/JasonHiew/Snipping-Lens?style=flat&color=limegreen"></a>
+<a href="https://github.com/JasonHiew/Snipping-Lens"><img alt="GitHub Last Commit" src="https://img.shields.io/github/last-commit/JasonHiew/Snipping-Lens?style=flat&color=lightyellow"></a>
 </p>
+
+> **Fork modifications:** Images are uploaded to [uguu.se](https://uguu.se) instead of Litterbox. After Google Lens opens, clicking **Copy** on any detected text automatically opens a [jpdb.io](https://jpdb.io) search for that word — useful for Japanese vocabulary lookup.
+>
+> Original project by [RisPNG](https://github.com/RisPNG/Snipping-Lens).
 
 - Found a coding video but cannot copy the code?
 - You're a dyslexic or know a dyslexic fella that has trouble spelling and copying things properly?
@@ -60,7 +64,7 @@ Check [Releases](https://github.com/RisPNG/Snipping-Lens/releases) for the lates
 
 ## Requirements
 
-- An Internet connection, and access to [Catbox](https://catbox.moe) and [Google](https://google.com).
+- An Internet connection, and access to [uguu.se](https://uguu.se) and [Google](https://google.com).
 
 ### Windows
 
@@ -75,7 +79,7 @@ Check [Releases](https://github.com/RisPNG/Snipping-Lens/releases) for the lates
 
 ### Where are my screenshots uploaded? Are they stored permanently?
 
-Screenshots are uploaded to [Litterbox](https://litterbox.catbox.moe/), a free and anonymous image hosting service, solely for the purpose of generating a URL that can be used with Google Lens. Images uploaded to Litterbox are not stored permanently, they automatically expire and are deleted after 1 hour. No user information is attached to the upload, and the application does not keep any record of your screenshots.
+Screenshots are uploaded to [uguu.se](https://uguu.se), a free and anonymous temporary file hosting service, solely for the purpose of generating a URL that can be used with Google Lens. Files uploaded to uguu.se are not stored permanently and are automatically deleted after 24 hours. No user information is attached to the upload, and the application does not keep any record of your screenshots.
 
 ### Why not use the locally stored image to query Google Lens?
 
@@ -85,7 +89,7 @@ I'm sure you're worried about privacy, but you shouldn't be uploading confidenti
 
 ### Limitations & Longevity
 
-As long as Litterbox returns the expected response (a direct image URL) and as long as the Google Lens endpoint `https://lens.google.com/uploadbyurl?url=<uploaded_image_url>` still exists and works, this program will continue to function as intended. If either service changes or is discontinued, the program's automatic search feature may no longer work.
+As long as uguu.se returns the expected response (a direct image URL) and as long as the Google Lens endpoint `https://lens.google.com/uploadbyurl?url=<uploaded_image_url>` still exists and works, this program will continue to function as intended. If either service changes or is discontinued, the program's automatic search feature may no longer work.
 
 ## Building from Source
 
