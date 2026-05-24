@@ -7,7 +7,7 @@ import psutil
 import time
 import hashlib
 import copykitten
-from PIL import Image
+from PIL import Image, ImageGrab
 from io import BytesIO
 import requests
 import threading
@@ -255,21 +255,6 @@ def kill_tray():
             continue
 
 
-def snippingtool_running():
-    for proc in psutil.process_iter(["name"]):
-        try:
-            if proc.info["name"] and proc.info["name"].lower() in [
-                "snippingtool.exe",
-                "screenclippinghost.exe",
-                "sniptool.exe",
-                "snipandsketch.exe",
-            ]:
-                return True
-        except Exception:
-            continue
-    return False
-
-
 def md5_image(pixels):
     return hashlib.md5(pixels).hexdigest()
 
@@ -279,6 +264,17 @@ def grab_clipboard_image_and_hash():
         pixels, width, height = copykitten.paste_image()
         return md5_image(pixels), (pixels, width, height)
     except Exception:
+        pass
+    try:
+        img = ImageGrab.grabclipboard()
+        if img is None:
+            return None, None
+        img = img.convert("RGBA")
+        width, height = img.size
+        pixels = img.tobytes()
+        return md5_image(pixels), (pixels, width, height)
+    except Exception as e:
+        logging.warning(f"[Clipboard] ImageGrab failed: {e}")
         return None, None
 
 
@@ -350,89 +346,102 @@ def watch_clipboard_for_jpdb(baseline_text, timeout=60):
         logging.info("[JPDB] Clipboard watcher timed out after %ds.", timeout)
 
 
+def upload_and_open_lens(hash_val, image_data, is_tray_snip):
+    logging.info("[SnippingTool] New clipboard image found.")
+    update_settings({"last_detected_image": hash_val})
+    tray_status = get_tray_status()
+
+    do_upload = tray_status == 2 or (tray_status == 1 and is_tray_snip)
+
+    if do_upload and image_data is not None:
+        pixels, width, height = image_data
+        img = Image.frombytes(mode="RGBA", size=(width, height), data=pixels)
+        with BytesIO() as output:
+            img.save(output, format="PNG")
+            output.seek(0)
+            files = {"files[]": ("snip.png", output, "image/png")}
+            logging.info("[Uguu] Uploading image...")
+            try:
+                response = requests.post(
+                    "https://uguu.se/upload",
+                    files=files,
+                    timeout=10,
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get("success") and data.get("files"):
+                        url = data["files"][0]["url"]
+                        logging.info(f"[Uguu] Upload success: {url}")
+                        update_settings({"last_upload_url": url})
+                        lens_url = f"https://lens.google.com/uploadbyurl?url={url}"
+                        logging.info(f"[Google Lens] Opening: {lens_url}")
+                        webbrowser.open_new_tab(lens_url)
+                        baseline = get_clipboard_text()
+                        threading.Thread(
+                            target=watch_clipboard_for_jpdb,
+                            args=(baseline,),
+                            daemon=True,
+                        ).start()
+                    else:
+                        logging.error(f"[Uguu] Upload failed: {data}")
+                else:
+                    logging.error(
+                        f"[Uguu] Upload failed with status: {response.text}"
+                    )
+            except Exception as e:
+                logging.error(f"[Uguu] Upload error: {e}")
+    else:
+        logging.info("[SnippingTool] No upload or duplicate or not allowed.")
+
+
 def clipboard_monitor_loop():
-    last_snip_running = False
-    last_hash = get_settings().get("last_detected_image", "")
+    # SnippingTool.exe runs persistently on Windows 11, so the process-close
+    # transition never fires. Use clipboard polling keyed on the snip token instead.
+    pending_token = None
+    token_set_time = None
+    token_baseline_hash = None
+    always_on_baseline_hash, _ = grab_clipboard_image_and_hash()
+
     while True:
         if os.path.exists(EXIT_WATCHDOG):
             break
 
-        now_running = snippingtool_running()
+        settings = get_settings()
+        tray_snip_token = settings.get("tray_snip_token")
+        val = settings.get("tray_status", 0)
+        tray_status = int(val["value"] if isinstance(val, dict) else val)
 
-        if last_snip_running and not now_running:
-            logging.info("[SnippingTool] Detected close. Checking clipboard...")
-            hash_val, image_data = grab_clipboard_image_and_hash()
+        if tray_snip_token and tray_snip_token != pending_token:
+            pending_token = tray_snip_token
+            token_set_time = time.time()
+            token_baseline_hash, _ = grab_clipboard_image_and_hash()
+            logging.info(f"[SnippingTool] Watching clipboard for token: {pending_token}")
 
-            settings = get_settings()
-            tray_snip_token = settings.get("tray_snip_token")
-            is_tray_snip = bool(tray_snip_token)
-
-            if is_tray_snip:
-                logging.info(f"Consumed snip token: {tray_snip_token}")
-                # Atomically consume the token by deleting it from settings
-                update_settings({}, delete_keys=["tray_snip_token"])
-
-            if hash_val and hash_val != last_hash:
-                logging.info("[SnippingTool] New clipboard image found.")
-                update_settings({"last_detected_image": hash_val})
-                tray_status = get_tray_status()
-
-                do_upload = tray_status == 2 or (tray_status == 1 and is_tray_snip)
-                do_open_lens = do_upload
-
-                if do_upload and image_data is not None:
-                    pixels, width, height = image_data
-                    img = Image.frombytes(
-                        mode="RGBA", size=(width, height), data=pixels
-                    )
-                    with BytesIO() as output:
-                        img.save(output, format="PNG")
-                        output.seek(0)
-                        files = {
-                            "files[]": ("snip.png", output, "image/png"),
-                        }
-                        logging.info("[Uguu] Uploading image...")
-                        try:
-                            response = requests.post(
-                                "https://uguu.se/upload",
-                                files=files,
-                                timeout=10,
-                            )
-                            if response.status_code == 200:
-                                data = response.json()
-                                if data.get("success") and data.get("files"):
-                                    url = data["files"][0]["url"]
-                                    logging.info(f"[Uguu] Upload success: {url}")
-                                    update_settings({"last_upload_url": url})
-                                    if do_open_lens:
-                                        lens_url = (
-                                            f"https://lens.google.com/uploadbyurl?url={url}"
-                                        )
-                                        logging.info(f"[Google Lens] Opening: {lens_url}")
-                                        webbrowser.open_new_tab(lens_url)
-                                        baseline = get_clipboard_text()
-                                        threading.Thread(
-                                            target=watch_clipboard_for_jpdb,
-                                            args=(baseline,),
-                                            daemon=True,
-                                        ).start()
-                                else:
-                                    logging.error(f"[Uguu] Upload failed: {data}")
-                            else:
-                                logging.error(
-                                    f"[Uguu] Upload failed with status: {response.text}"
-                                )
-                        except Exception as e:
-                            logging.error(f"[Uguu] Upload error: {e}")
-                else:
-                    logging.info(
-                        "[SnippingTool] No upload or duplicate or not allowed."
-                    )
+        if pending_token and token_set_time:
+            if time.time() - token_set_time > 30.0:
+                logging.info(f"[SnippingTool] Timed out waiting for snip: {pending_token}")
+                pending_token = None
+                token_set_time = None
             else:
-                logging.info("[SnippingTool] No new image or duplicate.")
+                hash_val, image_data = grab_clipboard_image_and_hash()
+                if hash_val and hash_val != token_baseline_hash:
+                    logging.info(f"[SnippingTool] Detected close. Checking clipboard...")
+                    if get_settings().get("tray_snip_token") == pending_token:
+                        logging.info(f"Consumed snip token: {pending_token}")
+                        update_settings({}, delete_keys=["tray_snip_token"])
+                    upload_and_open_lens(hash_val, image_data, is_tray_snip=True)
+                    always_on_baseline_hash = hash_val
+                    pending_token = None
+                    token_set_time = None
 
-        last_snip_running = now_running
-        time.sleep(0.2)
+        if not pending_token and tray_status == 2:
+            hash_val, image_data = grab_clipboard_image_and_hash()
+            if hash_val and hash_val != always_on_baseline_hash:
+                logging.info("[SnippingTool] Detected close. Checking clipboard...")
+                always_on_baseline_hash = hash_val
+                upload_and_open_lens(hash_val, image_data, is_tray_snip=False)
+
+        time.sleep(0.5)
 
 
 def watchdog_tray_monitor():
