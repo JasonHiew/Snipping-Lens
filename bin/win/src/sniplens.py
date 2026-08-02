@@ -82,6 +82,10 @@ DEFAULT_SETTINGS_WRAPPED = {
         "value": "",
         "description": "Alternate hotkey for Windows Snipping Tool (e.g., 'ctrl+shift+s')",
     },
+    "auto_upload_enabled": {
+        "value": True,
+        "description": "Automatically upload snips and open Google Lens",
+    },
 }
 
 DEFAULT_SETTINGS = {k: v["value"] for k, v in DEFAULT_SETTINGS_WRAPPED.items()}
@@ -219,6 +223,14 @@ class TrayApp(QObject):
         self.config_action = QAction("Open App")
         self.config_action.triggered.connect(self.open_config)
         self.menu.addAction(self.config_action)
+        self.auto_upload_action = QAction("Auto Upload to Google Lens")
+        self.auto_upload_action.setCheckable(True)
+        self.auto_upload_action.setChecked(
+            bool(self.settings.get("auto_upload_enabled", True))
+        )
+        self.auto_upload_action.toggled.connect(self.toggle_auto_upload)
+        self.menu.addAction(self.auto_upload_action)
+        self.menu.addSeparator()
         self.quit_action = QAction("Exit")
         self.quit_action.triggered.connect(self.exit_app)
         self.menu.addAction(self.quit_action)
@@ -250,6 +262,20 @@ class TrayApp(QObject):
     def open_config(self):
         open_flet_window()
         logging.info("Launched Snipping Lens main window.")
+
+    def toggle_auto_upload(self, checked):
+        self.settings["auto_upload_enabled"] = checked
+        update_settings(
+            {
+                "auto_upload_enabled": {
+                    "value": checked,
+                    "description": "Automatically upload snips and open Google Lens",
+                }
+            }
+        )
+        logging.info(
+            f"Auto upload to Google Lens {'enabled' if checked else 'disabled'} via tray menu."
+        )
 
     def exit_app(self):
         try:

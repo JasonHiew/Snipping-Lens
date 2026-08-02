@@ -294,6 +294,14 @@ def get_tray_status():
     return int(val)
 
 
+def get_auto_upload_enabled():
+    raw = get_settings()
+    val = raw.get("auto_upload_enabled", True)
+    if isinstance(val, dict) and "value" in val:
+        return bool(val["value"])
+    return bool(val)
+
+
 def update_settings(updates: dict, delete_keys: list = None):
     """Safely update settings, with an option to delete keys."""
     try:
@@ -351,7 +359,9 @@ def upload_and_open_lens(hash_val, image_data, is_tray_snip):
     update_settings({"last_detected_image": hash_val})
     tray_status = get_tray_status()
 
-    do_upload = tray_status == 2 or (tray_status == 1 and is_tray_snip)
+    do_upload = get_auto_upload_enabled() and (
+        tray_status == 2 or (tray_status == 1 and is_tray_snip)
+    )
 
     if do_upload and image_data is not None:
         pixels, width, height = image_data
