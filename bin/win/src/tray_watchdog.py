@@ -18,6 +18,7 @@ from watchdog.events import FileSystemEventHandler
 import logging
 import signal
 import win32clipboard
+import win32process
 
 # Import for hotkey functionality
 try:
@@ -36,6 +37,25 @@ EXIT_WATCHDOG = os.path.join(EXE_DIR, ".exit_watchdog")
 SETTINGS_PATH = os.path.abspath(os.path.join(EXE_DIR, "..", "config", "settings.json"))
 LOCKFILE = os.path.join(EXE_DIR, ".tray_watchdog.lock")
 LOG_FILE = os.path.abspath(os.path.join(EXE_DIR, "..", "logs", "sniplens.log"))
+
+# Always-On clipboard monitoring only reacts to images owned by these processes,
+# so third-party tools (e.g. ShareX) writing intermediate images to the clipboard
+# don't trigger an unwanted upload.
+SNIP_TOOL_PROCESS_NAMES = {
+    "snippingtool.exe",
+    "screenclippinghost.exe",
+    "sniptool.exe",
+    "snipandsketch.exe",
+}
+
+DEFAULT_CLIPBOARD_SITES = [
+    {
+        "id": "jpdb",
+        "name": "JPDB",
+        "url": "https://jpdb.io/search?q=<search_term>",
+        "enabled": True,
+    }
+]
 
 
 def singleton_lock():
@@ -302,6 +322,38 @@ def get_auto_upload_enabled():
     return bool(val)
 
 
+def get_clipboard_sites():
+    raw = get_settings()
+    val = raw.get("clipboard_sites")
+    sites = val["value"] if isinstance(val, dict) and "value" in val else val
+    return sites if isinstance(sites, list) and sites else DEFAULT_CLIPBOARD_SITES
+
+
+def get_default_clipboard_site():
+    sites = get_clipboard_sites()
+    raw = get_settings()
+    val = raw.get("default_clipboard_site_id")
+    default_id = val["value"] if isinstance(val, dict) and "value" in val else val
+    for site in sites:
+        if site.get("id") == default_id and site.get("enabled", True):
+            return site
+    for site in sites:
+        if site.get("enabled", True):
+            return site
+    return None
+
+
+def get_clipboard_owner_process_name():
+    try:
+        hwnd = win32clipboard.GetClipboardOwner()
+        if not hwnd:
+            return None
+        _, pid = win32process.GetWindowThreadProcessId(hwnd)
+        return psutil.Process(pid).name().lower()
+    except Exception:
+        return None
+
+
 def update_settings(updates: dict, delete_keys: list = None):
     """Safely update settings, with an option to delete keys."""
     try:
@@ -338,20 +390,22 @@ def get_clipboard_text():
             pass
 
 
-def watch_clipboard_for_jpdb(baseline_text, timeout=60):
+def watch_clipboard_for_site(baseline_text, timeout=60):
     deadline = time.time() + timeout
     while time.time() < deadline:
         if os.path.exists(EXIT_WATCHDOG):
             break
         text = get_clipboard_text()
         if text and text != baseline_text and text.strip():
-            jpdb_url = f"https://jpdb.io/search?q={quote(text.strip())}"
-            logging.info(f"[JPDB] Opening: {jpdb_url}")
-            webbrowser.open_new_tab(jpdb_url)
+            site = get_default_clipboard_site()
+            if site:
+                url = site["url"].replace("<search_term>", quote(text.strip()))
+                logging.info(f"[ClipboardSite] Opening {site.get('name', url)}: {url}")
+                webbrowser.open_new_tab(url)
             break
         time.sleep(0.5)
     else:
-        logging.info("[JPDB] Clipboard watcher timed out after %ds.", timeout)
+        logging.info("[ClipboardSite] Clipboard watcher timed out after %ds.", timeout)
 
 
 def upload_and_open_lens(hash_val, image_data, is_tray_snip):
@@ -388,7 +442,7 @@ def upload_and_open_lens(hash_val, image_data, is_tray_snip):
                         webbrowser.open_new_tab(lens_url)
                         baseline = get_clipboard_text()
                         threading.Thread(
-                            target=watch_clipboard_for_jpdb,
+                            target=watch_clipboard_for_site,
                             args=(baseline,),
                             daemon=True,
                         ).start()
@@ -447,9 +501,15 @@ def clipboard_monitor_loop():
         if not pending_token and tray_status == 2:
             hash_val, image_data = grab_clipboard_image_and_hash()
             if hash_val and hash_val != always_on_baseline_hash:
-                logging.info("[SnippingTool] Detected close. Checking clipboard...")
                 always_on_baseline_hash = hash_val
-                upload_and_open_lens(hash_val, image_data, is_tray_snip=False)
+                owner = get_clipboard_owner_process_name()
+                if owner in SNIP_TOOL_PROCESS_NAMES:
+                    logging.info("[SnippingTool] Detected close. Checking clipboard...")
+                    upload_and_open_lens(hash_val, image_data, is_tray_snip=False)
+                else:
+                    logging.info(
+                        f"[SnippingTool] Ignored clipboard image from non-snip source: {owner or 'unknown'}"
+                    )
 
         time.sleep(0.5)
 

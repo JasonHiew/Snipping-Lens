@@ -9,7 +9,7 @@ import uuid
 import signal
 
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
-from PySide6.QtGui import QIcon, QAction
+from PySide6.QtGui import QIcon, QAction, QActionGroup
 from PySide6.QtCore import QObject, QPoint
 
 EXE_DIR = os.path.dirname(
@@ -89,6 +89,37 @@ DEFAULT_SETTINGS_WRAPPED = {
 }
 
 DEFAULT_SETTINGS = {k: v["value"] for k, v in DEFAULT_SETTINGS_WRAPPED.items()}
+
+DEFAULT_CLIPBOARD_SITES = [
+    {
+        "id": "jpdb",
+        "name": "JPDB",
+        "url": "https://jpdb.io/search?q=<search_term>",
+        "enabled": True,
+    }
+]
+
+
+def get_clipboard_sites():
+    try:
+        with open(SETTINGS_PATH, "r") as f:
+            raw = json.load(f)
+    except Exception:
+        return DEFAULT_CLIPBOARD_SITES
+    val = raw.get("clipboard_sites")
+    sites = val["value"] if isinstance(val, dict) and "value" in val else val
+    return sites if isinstance(sites, list) and sites else DEFAULT_CLIPBOARD_SITES
+
+
+def get_default_clipboard_site_id():
+    try:
+        with open(SETTINGS_PATH, "r") as f:
+            raw = json.load(f)
+    except Exception:
+        return DEFAULT_CLIPBOARD_SITES[0]["id"]
+    val = raw.get("default_clipboard_site_id")
+    default_id = val["value"] if isinstance(val, dict) and "value" in val else val
+    return default_id or DEFAULT_CLIPBOARD_SITES[0]["id"]
 
 
 def resource_path(relative_path):
@@ -230,6 +261,9 @@ class TrayApp(QObject):
         )
         self.auto_upload_action.toggled.connect(self.toggle_auto_upload)
         self.menu.addAction(self.auto_upload_action)
+        self.sites_menu = QMenu("Default Search Site")
+        self.sites_menu.aboutToShow.connect(self.populate_sites_menu)
+        self.menu.addMenu(self.sites_menu)
         self.menu.addSeparator()
         self.quit_action = QAction("Exit")
         self.quit_action.triggered.connect(self.exit_app)
@@ -276,6 +310,48 @@ class TrayApp(QObject):
         logging.info(
             f"Auto upload to Google Lens {'enabled' if checked else 'disabled'} via tray menu."
         )
+
+    def populate_sites_menu(self):
+        self.sites_menu.clear()
+        sites = get_clipboard_sites()
+        current_default = get_default_clipboard_site_id()
+
+        enabled_sites = [s for s in sites if s.get("enabled", True)]
+        if not enabled_sites:
+            empty_action = QAction("No sites configured")
+            empty_action.setEnabled(False)
+            self.sites_menu.addAction(empty_action)
+            return
+
+        group = QActionGroup(self.sites_menu)
+        group.setExclusive(True)
+        actions = []
+        for site in enabled_sites:
+            action = QAction(site.get("name") or site.get("url", ""))
+            action.setCheckable(True)
+            action.setChecked(site["id"] == current_default)
+            action.triggered.connect(
+                lambda checked, sid=site["id"]: self.set_default_site(sid)
+            )
+            group.addAction(action)
+            self.sites_menu.addAction(action)
+            actions.append(action)
+
+        # Keep references alive while the submenu is open; QMenu.clear() only
+        # deletes the underlying C++ objects, Python refs would else be collected.
+        self._sites_action_group = group
+        self._sites_actions = actions
+
+    def set_default_site(self, site_id):
+        update_settings(
+            {
+                "default_clipboard_site_id": {
+                    "value": site_id,
+                    "description": "ID of the site opened automatically when clipboard text changes after a Lens search.",
+                }
+            }
+        )
+        logging.info(f"Default clipboard search site set to: {site_id}")
 
     def exit_app(self):
         try:

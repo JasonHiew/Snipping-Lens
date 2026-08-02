@@ -3,6 +3,7 @@ import os
 import sys
 import json
 import asyncio
+import uuid
 import winshell
 import subprocess
 import shutil
@@ -24,6 +25,15 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
+
+DEFAULT_CLIPBOARD_SITES = [
+    {
+        "id": "jpdb",
+        "name": "JPDB",
+        "url": "https://jpdb.io/search?q=<search_term>",
+        "enabled": True,
+    }
+]
 
 def write_pid_lock():
     try:
@@ -50,16 +60,24 @@ def load_settings():
             v = raw.get(key, default)
             return v["value"] if isinstance(v, dict) and "value" in v else v
 
+        sites = val("clipboard_sites", None)
+        if not isinstance(sites, list) or not sites:
+            sites = [dict(site) for site in DEFAULT_CLIPBOARD_SITES]
+
         return {
             "tray_status": val("tray_status", 0),
             "startup": val("startup", 0),
             "alternate_hotkey": val("alternate_hotkey", ""),
+            "clipboard_sites": sites,
+            "default_clipboard_site_id": val("default_clipboard_site_id", sites[0]["id"]),
         }
     except Exception:
         return {
             "tray_status": 2,
             "startup": 0,
             "alternate_hotkey": "",
+            "clipboard_sites": [dict(site) for site in DEFAULT_CLIPBOARD_SITES],
+            "default_clipboard_site_id": DEFAULT_CLIPBOARD_SITES[0]["id"],
         }
 
 
@@ -81,6 +99,14 @@ def save_settings(settings):
         raw["alternate_hotkey"] = {
             "value": settings["alternate_hotkey"],
             "description": "Alternate hotkey for Windows Snipping Tool (e.g., 'ctrl+shift+s')",
+        }
+        raw["clipboard_sites"] = {
+            "value": settings["clipboard_sites"],
+            "description": "Websites that can be opened with copied text. Use <search_term> as the placeholder.",
+        }
+        raw["default_clipboard_site_id"] = {
+            "value": settings["default_clipboard_site_id"],
+            "description": "ID of the site opened automatically when clipboard text changes after a Lens search.",
         }
         with open(SETTINGS_PATH, "w") as f:
             json.dump(raw, f, indent=4)
@@ -336,6 +362,126 @@ def main(page: ft.Page):
         helper_text="Click to capture new hotkey.",
     )
 
+    sites_column = ft.Column(spacing=6, scroll=ft.ScrollMode.AUTO, height=160)
+
+    def make_site_row(site):
+        name_field = ft.TextField(
+            value=site["name"],
+            width=140,
+            dense=True,
+            label="Name",
+            border=ft.InputBorder.OUTLINE,
+        )
+        url_field = ft.TextField(
+            value=site["url"],
+            expand=True,
+            dense=True,
+            label="URL template (use <search_term>)",
+            border=ft.InputBorder.OUTLINE,
+        )
+
+        def on_name_change(e):
+            site["name"] = name_field.value
+            save_settings(settings)
+
+        def on_url_change(e):
+            site["url"] = url_field.value
+            save_settings(settings)
+
+        name_field.on_blur = on_name_change
+        url_field.on_blur = on_url_change
+
+        def on_enabled_change(e):
+            site["enabled"] = e.control.value
+            save_settings(settings)
+
+        enabled_switch = ft.Switch(
+            value=site.get("enabled", True),
+            tooltip="Enabled",
+            on_change=on_enabled_change,
+        )
+
+        def on_delete_click(e):
+            settings["clipboard_sites"] = [
+                s for s in settings["clipboard_sites"] if s["id"] != site["id"]
+            ]
+            if not settings["clipboard_sites"]:
+                settings["clipboard_sites"] = [dict(DEFAULT_CLIPBOARD_SITES[0])]
+            if settings["default_clipboard_site_id"] == site["id"]:
+                settings["default_clipboard_site_id"] = settings["clipboard_sites"][0]["id"]
+                default_radio_group.value = settings["default_clipboard_site_id"]
+            save_settings(settings)
+            render_sites()
+
+        delete_btn = ft.IconButton(
+            icon=ft.Icons.DELETE_OUTLINE,
+            tooltip="Delete site",
+            on_click=on_delete_click,
+        )
+
+        return ft.Row(
+            [
+                ft.Radio(value=site["id"], tooltip="Default site"),
+                name_field,
+                url_field,
+                enabled_switch,
+                delete_btn,
+            ],
+        )
+
+    def render_sites():
+        sites_column.controls = [
+            make_site_row(site) for site in settings["clipboard_sites"]
+        ]
+        page.update()
+
+    def on_default_site_change(e):
+        settings["default_clipboard_site_id"] = e.control.value
+        save_settings(settings)
+
+    default_radio_group = ft.RadioGroup(
+        value=settings["default_clipboard_site_id"],
+        on_change=on_default_site_change,
+        content=sites_column,
+    )
+
+    new_name_field = ft.TextField(
+        hint_text="Name", width=140, dense=True, border=ft.InputBorder.OUTLINE
+    )
+    new_url_field = ft.TextField(
+        hint_text="https://example.com/search?q=<search_term>",
+        expand=True,
+        dense=True,
+        border=ft.InputBorder.OUTLINE,
+    )
+
+    def on_add_site_click(e):
+        if not new_url_field.value or not new_url_field.value.strip():
+            return
+        new_site = {
+            "id": str(uuid.uuid4()),
+            "name": new_name_field.value.strip() or new_url_field.value.strip(),
+            "url": new_url_field.value.strip(),
+            "enabled": True,
+        }
+        settings["clipboard_sites"].append(new_site)
+        save_settings(settings)
+        new_name_field.value = ""
+        new_url_field.value = ""
+        render_sites()
+
+    add_site_row = ft.Row(
+        [
+            new_name_field,
+            new_url_field,
+            ft.IconButton(
+                icon=ft.Icons.ADD, tooltip="Add site", on_click=on_add_site_click
+            ),
+        ]
+    )
+
+    render_sites()
+
     log_field = ft.TextField(
         label="Live Log",
         read_only=True,
@@ -393,6 +539,15 @@ def main(page: ft.Page):
                     ],
                     alignment=ft.MainAxisAlignment.CENTER,
                 ),
+                ft.Container(height=20),  # Spacer
+                ft.Text(
+                    "Clipboard Search Sites",
+                    size=18,
+                    weight=ft.FontWeight.BOLD,
+                    text_align=ft.TextAlign.CENTER,
+                ),
+                default_radio_group,
+                add_site_row,
                 log_field,
             ]
         )
