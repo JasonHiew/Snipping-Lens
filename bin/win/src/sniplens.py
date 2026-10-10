@@ -7,10 +7,11 @@ import logging
 import atexit
 import uuid
 import signal
+import time
 
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 from PySide6.QtGui import QIcon, QAction, QActionGroup
-from PySide6.QtCore import QObject, QPoint
+from PySide6.QtCore import QObject, QPoint, QTimer
 
 EXE_DIR = os.path.dirname(
     os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__)
@@ -194,6 +195,17 @@ def update_settings(updates: dict):
         logging.error("Failed to update settings: %s", e)
 
 
+def is_watchdog_running():
+    for proc in psutil.process_iter(["cmdline"]):
+        try:
+            cmdline = proc.info["cmdline"]
+            if cmdline and any("tray_watchdog.py" in part for part in cmdline):
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def open_flet_window():
     if os.path.exists(LOCKFILE_APP):
         try:
@@ -279,6 +291,50 @@ class TrayApp(QObject):
             logging.info("Tray icon hidden.")
 
         self.last_tray_click_pos = QPoint(0, 0)
+
+        # The watchdog does all clipboard handling; if it dies (e.g. a native
+        # crash) the tray keeps running but snips are silently ignored.
+        self._watchdog_missing_checks = 0
+        self._watchdog_restart_times = []
+        self._watchdog_gave_up = False
+        self.watchdog_timer = QTimer()
+        self.watchdog_timer.setInterval(5000)
+        self.watchdog_timer.timeout.connect(self.check_watchdog)
+        self.watchdog_timer.start()
+
+    def check_watchdog(self):
+        if os.path.exists(EXIT_WATCHDOG) or is_watchdog_running():
+            self._watchdog_missing_checks = 0
+            return
+        # Require two consecutive misses so a watchdog that is mid-restart
+        # isn't launched twice.
+        self._watchdog_missing_checks += 1
+        if self._watchdog_missing_checks < 2:
+            return
+        self._watchdog_missing_checks = 0
+
+        now = time.time()
+        self._watchdog_restart_times = [
+            t for t in self._watchdog_restart_times if now - t < 600
+        ]
+        if len(self._watchdog_restart_times) >= 5:
+            if not self._watchdog_gave_up:
+                logging.error(
+                    "[Tray] Watchdog crashed 5 times in 10 minutes; not restarting it again for now."
+                )
+                self._watchdog_gave_up = True
+            return
+        self._watchdog_gave_up = False
+        self._watchdog_restart_times.append(now)
+
+        logging.warning("[Tray] Watchdog is not running; restarting it.")
+        try:
+            subprocess.Popen(
+                [sys.executable, os.path.join(EXE_DIR, "tray_watchdog.py")],
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        except Exception as e:
+            logging.error(f"[Tray] Failed to restart watchdog: {e}")
 
     def icon_clicked(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:

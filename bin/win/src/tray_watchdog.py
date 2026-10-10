@@ -17,6 +17,8 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 import logging
 import signal
+import faulthandler
+import functools
 import win32clipboard
 import win32process
 
@@ -112,6 +114,28 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
+
+# Native crashes (e.g. heap corruption) kill the process before logging runs;
+# faulthandler still dumps every thread's stack to this file.
+_fault_log = open(
+    os.path.join(os.path.dirname(LOG_FILE), "tray_watchdog_crash.log"), "a"
+)
+faulthandler.enable(file=_fault_log, all_threads=True)
+
+# The Windows clipboard is a single shared resource; copykitten, PIL and
+# win32clipboard each open and close it on their own, so concurrent access from
+# the monitor loop and the site watcher thread can corrupt the heap.
+CLIPBOARD_LOCK = threading.Lock()
+
+
+def clipboard_locked(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        with CLIPBOARD_LOCK:
+            return func(*args, **kwargs)
+
+    return wrapper
+
 
 # Global variable to hold the hotkey listener
 hotkey_listener = None
@@ -279,6 +303,7 @@ def md5_image(pixels):
     return hashlib.md5(pixels).hexdigest()
 
 
+@clipboard_locked
 def grab_clipboard_image_and_hash():
     try:
         pixels, width, height = copykitten.paste_image()
@@ -343,6 +368,7 @@ def get_default_clipboard_site():
     return None
 
 
+@clipboard_locked
 def get_clipboard_owner_process_name():
     try:
         hwnd = win32clipboard.GetClipboardOwner()
@@ -375,6 +401,7 @@ def update_settings(updates: dict, delete_keys: list = None):
         logging.error("Failed to update settings: %s", e)
 
 
+@clipboard_locked
 def get_clipboard_text():
     try:
         win32clipboard.OpenClipboard()
