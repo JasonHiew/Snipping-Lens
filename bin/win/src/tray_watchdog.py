@@ -390,11 +390,16 @@ def get_clipboard_text():
             pass
 
 
-def watch_clipboard_for_site(baseline_text, timeout=60):
+# Incremented each time a site watcher starts; older watchers see the change and
+# exit, so only the most recent snip opens a site when text is copied.
+site_watcher_generation = 0
+
+
+def watch_clipboard_for_site(baseline_text, generation, timeout=60):
     deadline = time.time() + timeout
     while time.time() < deadline:
-        if os.path.exists(EXIT_WATCHDOG):
-            break
+        if os.path.exists(EXIT_WATCHDOG) or generation != site_watcher_generation:
+            return
         text = get_clipboard_text()
         if text and text != baseline_text and text.strip():
             site = get_default_clipboard_site()
@@ -409,6 +414,7 @@ def watch_clipboard_for_site(baseline_text, timeout=60):
 
 
 def upload_and_open_lens(hash_val, image_data, is_tray_snip):
+    global site_watcher_generation
     logging.info("[SnippingTool] New clipboard image found.")
     update_settings({"last_detected_image": hash_val})
     tray_status = get_tray_status()
@@ -440,10 +446,11 @@ def upload_and_open_lens(hash_val, image_data, is_tray_snip):
                         lens_url = f"https://lens.google.com/uploadbyurl?url={url}"
                         logging.info(f"[Google Lens] Opening: {lens_url}")
                         webbrowser.open_new_tab(lens_url)
+                        site_watcher_generation += 1
                         baseline = get_clipboard_text()
                         threading.Thread(
                             target=watch_clipboard_for_site,
-                            args=(baseline,),
+                            args=(baseline, site_watcher_generation),
                             daemon=True,
                         ).start()
                     else:
@@ -484,6 +491,8 @@ def clipboard_monitor_loop():
         if pending_token and token_set_time:
             if time.time() - token_set_time > 30.0:
                 logging.info(f"[SnippingTool] Timed out waiting for snip: {pending_token}")
+                if get_settings().get("tray_snip_token") == pending_token:
+                    update_settings({}, delete_keys=["tray_snip_token"])
                 pending_token = None
                 token_set_time = None
             else:
@@ -503,12 +512,13 @@ def clipboard_monitor_loop():
             if hash_val and hash_val != always_on_baseline_hash:
                 always_on_baseline_hash = hash_val
                 owner = get_clipboard_owner_process_name()
-                if owner in SNIP_TOOL_PROCESS_NAMES:
+                # Snip tools often leave no clipboard owner, so unknown is allowed.
+                if owner is None or owner in SNIP_TOOL_PROCESS_NAMES:
                     logging.info("[SnippingTool] Detected close. Checking clipboard...")
                     upload_and_open_lens(hash_val, image_data, is_tray_snip=False)
                 else:
                     logging.info(
-                        f"[SnippingTool] Ignored clipboard image from non-snip source: {owner or 'unknown'}"
+                        f"[SnippingTool] Ignored clipboard image from non-snip source: {owner}"
                     )
 
         time.sleep(0.5)
