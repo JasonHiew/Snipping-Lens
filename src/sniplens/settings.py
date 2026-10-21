@@ -21,10 +21,16 @@ SEARCH_TERM_PLACEHOLDER = "<search_term>"
 DEFAULT_CLIPBOARD_SITES = [
     {
         "id": "jpdb",
-        "name": "JPDB",
+        "name": "JP",
         "url": f"https://jpdb.io/search?q={SEARCH_TERM_PLACEHOLDER}",
         "enabled": True,
-    }
+    },
+    {
+        "id": "trainchinese",
+        "name": "ZH",
+        "url": f"https://trainchinese.com/v2/search.php?searchWord={SEARCH_TERM_PLACEHOLDER}",
+        "enabled": True,
+    },
 ]
 
 DEFAULT_SETTINGS = {
