@@ -29,6 +29,10 @@ MONOSPACE_FONT = "Consolas" if paths.IS_WINDOWS else "Menlo" if paths.IS_MAC els
 LOG_TAIL_BYTES = 8192
 LOG_TAIL_LINES = 10
 
+SITES_VISIBLE_ROWS = 3
+SITE_ROW_HEIGHT = 48
+SITE_ROW_SPACING = 6
+
 # Modifier keys report a side on Linux ("Control Left") while the generic
 # names arrive without one.
 MODIFIER_KEYS = {
@@ -217,7 +221,7 @@ def build_config_window(page: ft.Page):
         helper="Click to capture new hotkey.",
     )
 
-    sites_column = ft.Column(spacing=6, scroll=ft.ScrollMode.AUTO, height=150)
+    sites_column = ft.Column(spacing=SITE_ROW_SPACING, scroll=ft.ScrollMode.AUTO)
 
     def save_sites():
         save(
@@ -279,6 +283,10 @@ def build_config_window(page: ft.Page):
 
     def render_sites():
         sites_column.controls = [make_site_row(site) for site in settings["clipboard_sites"]]
+        # sized to its rows so a short list leaves no gap; past
+        # SITES_VISIBLE_ROWS it scrolls instead of pushing the log down
+        rows = min(len(settings["clipboard_sites"]), SITES_VISIBLE_ROWS)
+        sites_column.height = rows * SITE_ROW_HEIGHT + (rows - 1) * SITE_ROW_SPACING
         sites_group.value = settings["default_clipboard_site_id"]
         page.update()
 
@@ -325,18 +333,26 @@ def build_config_window(page: ft.Page):
         ]
     )
 
-    log_field = ft.TextField(
-        label="Live Log",
-        read_only=True,
-        multiline=True,
-        min_lines=1,
-        max_lines=12,
-        value="Loading...",
+    # a list rather than a read-only TextField, so it can stay scrolled to the
+    # newest entry while filling whatever height the sections above leave
+    log_list = ft.ListView(expand=True, auto_scroll=True, spacing=2)
+    log_field = ft.Container(
+        content=ft.Column(
+            [ft.Text("Live Log", size=12, color=ft.Colors.ON_SURFACE_VARIANT), log_list],
+            spacing=4,
+            expand=True,
+        ),
+        border=ft.Border.all(1, ft.Colors.OUTLINE),
+        border_radius=4,
+        padding=ft.Padding(12, 6, 12, 8),
         expand=True,
-        autofocus=False,
-        border=ft.OutlineInputBorder(),
-        text_style=ft.TextStyle(size=13, font_family=MONOSPACE_FONT),
     )
+
+    def show_log(lines):
+        log_list.controls = [
+            ft.Text(line, size=13, font_family=MONOSPACE_FONT, selectable=True) for line in lines
+        ]
+        log_list.update()
 
     mode_columns = [
         ft.Column(
@@ -394,12 +410,16 @@ def build_config_window(page: ft.Page):
                 sites_group,
                 add_site_row,
                 log_field,
-            ]
+            ],
+            # fills the window so the log takes whatever height is left rather
+            # than growing past the bottom edge
+            expand=True,
         )
     )
     render_sites()
 
     async def poll_log():
+        shown = None
         while True:
             try:
                 # only the tail is read; the log is never rotated and this runs
@@ -408,12 +428,16 @@ def build_config_window(page: ft.Page):
                     f.seek(0, os.SEEK_END)
                     f.seek(max(0, f.tell() - LOG_TAIL_BYTES))
                     lines = f.read().decode("utf-8", "replace").splitlines()
-                log_field.value = "\n".join(lines[-LOG_TAIL_LINES:]) if lines else "(Log empty.)"
+                lines = lines[-LOG_TAIL_LINES:] or ["(Log empty.)"]
             except FileNotFoundError:
-                log_field.value = "(No log file found.)"
+                lines = ["(No log file found.)"]
             except OSError as e:
-                log_field.value = f"(Error reading log: {e})"
-            log_field.update()
+                lines = [f"(Error reading log: {e})"]
+            # only on change, so scrolling up to read older lines is not undone
+            # by the next poll jumping back to the bottom
+            if lines != shown:
+                show_log(lines)
+                shown = lines
             await asyncio.sleep(1)
 
     page.on_keyboard_event = on_key_down
