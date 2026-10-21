@@ -3,7 +3,7 @@ import logging
 from PySide6.QtGui import QActionGroup, QCursor, QIcon
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
-from sniplens import APP_NAME, theme
+from sniplens import APP_NAME, paths, theme
 
 MENU_STYLE = f"""
 QMenu {{
@@ -101,5 +101,7 @@ class TrayController:
             return
         if self._snip_on_left_click:
             self._commands.request_snip(from_app_trigger=True)
-        else:
+        elif not paths.IS_MAC:
+            # macOS already opens the context menu for a menu bar click; a
+            # popup here would open a second copy
             self.menu.popup(QCursor.pos())

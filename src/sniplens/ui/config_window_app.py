@@ -24,6 +24,8 @@ SWITCH_COLORS = {
     1: theme.ACCENT,
 }
 
+MONOSPACE_FONT = "Consolas" if paths.IS_WINDOWS else "Menlo" if paths.IS_MAC else "monospace"
+
 LOG_TAIL_BYTES = 8192
 LOG_TAIL_LINES = 10
 
@@ -104,7 +106,11 @@ def build_config_window(page: ft.Page):
         settings["tray_status"],
         [
             ("Pause", "Disable all features."),
-            ("Tray Only", "Trigger Google Lens searches only if snip is launched from the tray."),
+            (
+                "Tray Only",
+                "Trigger Google Lens searches only if snip is launched from the "
+                + ("menu bar." if paths.IS_MAC else "tray."),
+            ),
             ("Always On", "Trigger Google Lens searches regardless of where the snip is launched from."),
         ],
         STATUS_COLORS,
@@ -123,7 +129,7 @@ def build_config_window(page: ft.Page):
     )
 
     app_menu_toggle = None
-    if not paths.IS_WINDOWS:
+    if paths.IS_LINUX:
 
         def on_app_menu_change(index):
             save({"app_menu": index})
@@ -329,7 +335,7 @@ def build_config_window(page: ft.Page):
         expand=True,
         autofocus=False,
         border=ft.OutlineInputBorder(),
-        text_style=ft.TextStyle(size=13, font_family="Consolas" if paths.IS_WINDOWS else "monospace"),
+        text_style=ft.TextStyle(size=13, font_family=MONOSPACE_FONT),
     )
 
     mode_columns = [
@@ -429,7 +435,7 @@ def build_config_window(page: ft.Page):
 
 def run():
     setup_logging()
-    if not paths.IS_WINDOWS:
+    if paths.IS_LINUX:
         # the Flet client renders a black window on hybrid NVIDIA machines
         # unless GL is software-rendered; users can override by exporting it
         os.environ.setdefault("LIBGL_ALWAYS_SOFTWARE", "1")

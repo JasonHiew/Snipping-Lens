@@ -61,7 +61,7 @@ DEFAULT_SETTINGS = {
         "description": "ID of the site opened automatically when clipboard text changes after a Lens search.",
     },
 }
-if not paths.IS_WINDOWS:
+if paths.IS_LINUX:
     DEFAULT_SETTINGS["app_menu"] = {
         "value": 0,
         "description": "0=Off, 1=On",

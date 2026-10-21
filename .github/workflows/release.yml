@@ -59,8 +59,33 @@ jobs:
           name: linux-zip
           path: SnippingLens-Linux.zip
 
+  build-mac:
+    # Only run if the commit message contains "Release v"
+    if: contains(github.event.head_commit.message, 'Release v')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create macOS zip
+        run: |
+          zip -r SnippingLens-macOS.zip \
+            setup_mac.sh \
+            readme.md \
+            src/ \
+            bin/mac/ \
+            int/ \
+            logs/
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-zip
+          path: SnippingLens-macOS.zip
+
   release:
-    needs: [build-windows, build-linux]
+    needs: [build-windows, build-linux, build-mac]
     runs-on: ubuntu-latest
 
     steps:
@@ -129,6 +154,9 @@ jobs:
             ### Linux
             - **SnippingLens-Linux.zip** - Extract and run `./setup_linux.sh`
 
+            ### macOS
+            - **SnippingLens-macOS.zip** - Extract and run `bash setup_mac.sh` in Terminal
+
             ## Installation Instructions
 
             ### Windows
@@ -141,6 +169,12 @@ jobs:
             2. Run `./setup_linux.sh` to start the application but this will show a terminal.
             3. Use the config window (tray > Open App) to enable Startup and App Menu entries.
             4. Run through the App Menu entry to run Snipping Lens without showing a terminal, this is already by default for Startup option.
+
+            ### macOS (13 Ventura or later)
+            1. Download and extract `SnippingLens-macOS.zip`, then move the folder where you want to keep it.
+            2. In Terminal, run `bash setup_mac.sh` from that folder. It installs everything, creates `~/Applications/Snipping Lens.app` and starts it in the menu bar.
+            3. Allow Screen Recording when asked on your first snip, then quit and reopen Snipping Lens from Applications or Spotlight.
+            4. Use the config window (menu bar > Open App) to start Snipping Lens at login.
           draft: false
           prerelease: ${{ steps.extract_release_info.outputs.prerelease }}
 
@@ -162,4 +196,14 @@ jobs:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: "./linux-zip/SnippingLens-Linux.zip"
           asset_name: SnippingLens-Linux.zip
+          asset_content_type: application/zip
+
+      - name: Upload macOS Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: "./mac-zip/SnippingLens-macOS.zip"
+          asset_name: SnippingLens-macOS.zip
           asset_content_type: application/zip

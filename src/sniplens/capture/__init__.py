@@ -32,11 +32,15 @@ class CaptureFailed:
 
 def create_capture_service(app):
     """The single region-capture entry point; everything above this layer is
-    unaware of Windows, Wayland, X11 or portals."""
+    unaware of Windows, macOS, Wayland, X11 or portals."""
     if paths.IS_WINDOWS:
         from sniplens.capture.windows_snip import WindowsSnipCapture
 
         return WindowsSnipCapture()
+    if paths.IS_MAC:
+        from sniplens.capture.mac_capture import MacRegionCapture
+
+        return MacRegionCapture()
     from sniplens.capture.linux_capture import LinuxRegionCapture
 
     return LinuxRegionCapture(app)

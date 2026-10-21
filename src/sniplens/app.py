@@ -124,6 +124,7 @@ class ApplicationController(QObject):
             self._watcher.addPath(paths.SETTINGS_PATH)
         self._capture.completed.connect(self._on_snip_completed)
         self._hotkey.reconfigure(self._hotkeys())
+        self._warn_if_hotkeys_blocked()
         ensure_integration_entries(
             self._core.startup_enabled, self._core.app_menu_enabled
         )
@@ -274,6 +275,12 @@ class ApplicationController(QObject):
         self._core.reload()
         self._hotkey.reconfigure(self._hotkeys())
 
+    def _warn_if_hotkeys_blocked(self):
+        if paths.IS_MAC and self._hotkeys():
+            from sniplens.macos import warn_if_hotkeys_blocked
+
+            warn_if_hotkeys_blocked()
+
     def _listen_for_instances(self):
         server = QLocalServer(self)
         if not server.listen(SINGLE_INSTANCE_NAME):
@@ -346,6 +353,11 @@ def run():
 
     if _signal_existing_instance():
         return 0
+
+    if paths.IS_MAC:
+        from sniplens.macos import run_as_menu_bar_app
+
+        run_as_menu_bar_app()
 
     core = ApplicationCore(SettingsStore())
     lens = LensSearchService()

@@ -10,6 +10,7 @@
 > - Images are uploaded to [uguu.se](https://uguu.se) instead of Litterbox.
 > - After Google Lens opens, clicking **Copy** on detected text opens it in your default search site — [jpdb.io](https://jpdb.io) out of the box, useful for Japanese vocabulary lookup. Add or edit sites (e.g. `https://www.trainchinese.com/v2/search.php?searchWord=<search_term>`) in the config window under **Clipboard Search Sites**; `<search_term>` is replaced with the copied text.
 > - The tray menu has an **Auto Upload to Google Lens** toggle and a **Default Search Site** switcher.
+> - macOS support as a menu bar app (see [macOS](#macos)).
 >
 > Original project by [RisPNG](https://github.com/RisPNG/Snipping-Lens).
 
@@ -61,11 +62,18 @@ Check [Releases](https://github.com/RisPNG/Snipping-Lens/releases) for the lates
 - On Wayland, the screenshot is taken through your desktop's XDG Desktop Portal, which shows its own selection UI.
 - The captured screenshot is also copied to your clipboard.
 
+**macOS:**
+
+- Click the menu bar icon and choose "Snip", or use the configured hotkey (default: Alt/Option + Ctrl + \\).
+- macOS's own region selector appears (the same one as Cmd+Shift+4); press Space to pick a window, or Esc to cancel.
+- The captured screenshot is also copied to your clipboard.
+- Snipping Lens lives only in the menu bar, with no Dock icon.
+
 ### Tray Icon Actions
 
 - **Left-click** (Windows only): Takes a regional screenshot with the snipping tool.
-- **Right-click** (_and also left-click for Linux_): Show context menu with options:
-  - **Snip**: Takes a screenshot (Linux only).
+- **Right-click** (_and also left-click for Linux and macOS_): Show context menu with options:
+  - **Snip**: Takes a screenshot (Linux and macOS).
   - **Open App**: Opens Snipping Lens main window.
   - **Auto Upload to Google Lens**: Turns the upload and Lens search on or off.
   - **Default Search Site**: Picks which site copied text from Lens opens in.
@@ -82,6 +90,13 @@ Check [Releases](https://github.com/RisPNG/Snipping-Lens/releases) for the lates
 ### Linux
 
 - No screenshot tools needed. X11 is supported out of the box; on Wayland your desktop must provide the XDG Screenshot portal (GNOME, KDE and most modern desktops do). If it is missing, the log suggests the backend package to install for your desktop.
+
+### macOS
+
+- macOS 13 Ventura or later, on Apple Silicon or Intel.
+- **Screen Recording** permission (System Settings > Privacy & Security > Screen & System Audio Recording). macOS asks on your first snip; quit and reopen Snipping Lens after allowing it.
+- **Accessibility** permission, only if you use the global hotkey.
+- No Apple developer account or signing is needed: the setup script builds `~/Applications/Snipping Lens.app` on your Mac, so Gatekeeper does not block it.
 
 ## FAQ
 
@@ -101,7 +116,7 @@ As long as uguu.se returns the expected response (a direct image URL) and as lon
 
 ## Building from Source
 
-Both `setup_win.vbs` (Windows) and `setup_linux.sh` (Linux) build the application from source using their own portable Python environment ([MsPy](https://github.com/RisPNG/MsPy) 3.11). The application code lives in `src/`. If you want to use your own Python environment, adjust the interpreter path in `bin/win/install.bat` on Windows, or in `setup_linux.sh` on Linux.
+`setup_win.vbs` (Windows) and `setup_linux.sh` (Linux) build the application from source using their own portable Python environment ([MsPy](https://github.com/RisPNG/MsPy) 3.11). `setup_mac.sh` (macOS) does the same with a checksum-verified portable CPython 3.11 from [python-build-standalone](https://github.com/astral-sh/python-build-standalone), since MsPy has no macOS build. The application code lives in `src/`. If you want to use your own Python environment, adjust the interpreter path in `bin/win/install.bat` on Windows, `setup_linux.sh` on Linux, or `setup_mac.sh` on macOS.
 
 ## Support and Contributing
 
@@ -110,8 +125,8 @@ If you like this project, please leave a star 🌟, and share it with your frien
 If you encounter any issue:
 
 1. Check the [issues page](https://github.com/RisPNG/Snipping-Lens/issues) if issue has been raised.
-2. Create a new issue if necessary and provide in-depth details of the issue including the relevant logs. The last lines are shown in the app window (tray > Open App); the full log is at `bin/win/logs/sniplens.log` on Windows and `bin/linux/logs/sniplens.log` on Linux.
+2. Create a new issue if necessary and provide in-depth details of the issue including the relevant logs. The last lines are shown in the app window (tray > Open App); the full log is at `bin/win/logs/sniplens.log` on Windows, `bin/linux/logs/sniplens.log` on Linux and `bin/mac/logs/sniplens.log` on macOS.
 
 ## Disclaimer
 
-This project comes with no guarantee or warranty. You are responsible for whatever happens from using this project. This is a personal project and is in no way affiliated with Google nor Microsoft.
+This project comes with no guarantee or warranty. You are responsible for whatever happens from using this project. This is a personal project and is in no way affiliated with Google, Microsoft nor Apple.
