@@ -1,4 +1,5 @@
 import logging
+import subprocess
 
 
 def run_as_menu_bar_app():
@@ -13,16 +14,29 @@ def run_as_menu_bar_app():
     NSApplication.sharedApplication().setActivationPolicy_(NSApplicationActivationPolicyAccessory)
 
 
+INPUT_MONITORING_SETTINGS = "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
+
+
+def _open_settings(url):
+    subprocess.run(["/usr/bin/open", url], capture_output=True)
+
+
 def warn_if_hotkeys_blocked():
     """pynput's listener gets no key events, and says nothing, until the app is
-    granted Accessibility access."""
+    granted Input Monitoring; it only listens, so it needs no Accessibility.
+    Requesting the access lists Snipping Lens under Input Monitoring, ready
+    to switch on."""
     try:
-        from ApplicationServices import AXIsProcessTrusted
+        from Quartz import CGPreflightListenEventAccess, CGRequestListenEventAccess
     except ImportError:
         return
-    if not AXIsProcessTrusted():
+    if not CGPreflightListenEventAccess():
+        # recent macOS only lists the app, switched off, without asking, so
+        # open the page with the switch rather than leave the hotkey dead
+        if not CGRequestListenEventAccess():
+            _open_settings(INPUT_MONITORING_SETTINGS)
         logging.warning(
-            "[Hotkey] Hotkeys need the Accessibility permission. Enable Snipping Lens "
-            "(or the app that launched it, e.g. Terminal) in System Settings > Privacy "
-            "& Security > Accessibility, then quit and reopen Snipping Lens."
+            "[Hotkey] Hotkeys need the Input Monitoring permission. Enable Snipping Lens "
+            "in System Settings > Privacy & Security > Input Monitoring, then quit and "
+            "reopen Snipping Lens."
         )

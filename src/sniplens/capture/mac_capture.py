@@ -16,10 +16,16 @@ SCREEN_RECORDING_HELP = (
 )
 
 
+_access_requested = False
+
+
 def _screen_capture_allowed():
     """Without the permission macOS does not fail the capture, it returns an
     image of only the wallpaper and our own windows - so check up front, and
-    have macOS show its permission prompt the first time."""
+    have macOS show its permission prompt the first time. Only once: a grant
+    takes effect after a relaunch, so asking again on every snip would just
+    reopen System Settings each time."""
+    global _access_requested
     try:
         import Quartz
     except ImportError:
@@ -27,7 +33,9 @@ def _screen_capture_allowed():
         return True
     if Quartz.CGPreflightScreenCaptureAccess():
         return True
-    Quartz.CGRequestScreenCaptureAccess()
+    if not _access_requested:
+        _access_requested = True
+        Quartz.CGRequestScreenCaptureAccess()
     return False
 
 

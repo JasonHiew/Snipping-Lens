@@ -63,3 +63,85 @@ def test_injected_key_events_fire_hotkeys(monkeypatch):
     for key in combination:
         listener.on_press(key, True)
     assert fired == ["snip", "snip"]
+
+
+def test_mac_modifiers_are_shown_by_their_mac_names(monkeypatch):
+    from sniplens import paths
+    from sniplens.hotkey import display_hotkey
+
+    monkeypatch.setattr(paths, "IS_MAC", True)
+    assert display_hotkey("alt+ctrl+win+\\") == "option+ctrl+cmd+\\"
+    assert display_hotkey("lwin+ralt+a") == "lcmd+roption+a"
+    assert display_hotkey("") == ""
+    monkeypatch.setattr(paths, "IS_MAC", False)
+    assert display_hotkey("alt+win+a") == "alt+win+a"
+
+
+def test_mac_modifier_names_are_accepted_in_settings():
+    assert to_pynput_hotkey("cmd+option+a") == "<cmd>+<alt>+a"
+    assert to_pynput_hotkey("rcmd+loption+a") == "<cmd_r>+<alt_l>+a"
+
+
+@pytest.fixture
+def mac_controller(monkeypatch):
+    from sniplens import hotkey, paths
+
+    monkeypatch.setattr(paths, "IS_MAC", True)
+    monkeypatch.setattr(hotkey, "_mac_keycodes", lambda: {"\\": 42, "2": 84, "s": 1, "`": 50, "~": 50})
+    monkeypatch.setattr(keyboard.Listener, "start", lambda self: None)
+    return HotkeyController()
+
+
+def test_mac_hotkeys_match_by_key_code(mac_controller):
+    """Option changes the character a key types on macOS, so Option+Cmd+\\
+    arrives as «; the key code still says which key it was."""
+    fired = []
+    mac_controller.reconfigure({"alt+win+\\": lambda: fired.append("snip")})
+    listener = mac_controller._listener
+    for key in (keyboard.Key.alt, keyboard.Key.cmd, keyboard.KeyCode.from_char("«", vk=42)):
+        listener.on_press(key, False)
+    assert fired == ["snip"]
+
+
+def test_mac_shifted_and_injected_keys_match(mac_controller):
+    fired = []
+    mac_controller.reconfigure({"shift+ctrl+2": lambda: fired.append("snip")})
+    listener = mac_controller._listener
+    for key in (keyboard.Key.shift, keyboard.Key.ctrl, keyboard.KeyCode.from_char("@", vk=84)):
+        listener.on_press(key, False)
+    assert fired == ["snip"]
+    for key in (keyboard.Key.shift, keyboard.Key.ctrl, keyboard.KeyCode.from_char("@", vk=84)):
+        listener.on_release(key, False)
+    # injected events can carry a character and no key code
+    for key in (keyboard.Key.shift, keyboard.Key.ctrl, keyboard.KeyCode.from_char("2")):
+        listener.on_press(key, True)
+    assert fired == ["snip", "snip"]
+
+
+def test_mac_hotkey_ignores_other_keys(mac_controller):
+    fired = []
+    mac_controller.reconfigure({"alt+win+\\": lambda: fired.append("snip")})
+    listener = mac_controller._listener
+    for key in (keyboard.Key.alt, keyboard.Key.cmd, keyboard.KeyCode.from_char("ß", vk=1)):
+        listener.on_press(key, False)
+    assert fired == []
+
+
+def test_mac_hotkey_recorded_as_a_shifted_character(mac_controller):
+    """The settings window records Cmd+Shift+` as "~", which has no key of
+    its own; it must still match the ` key pressed with Shift."""
+    fired = []
+    mac_controller.reconfigure({"shift+win+~": lambda: fired.append("snip")})
+    listener = mac_controller._listener
+    for key in (keyboard.Key.shift, keyboard.Key.cmd, keyboard.KeyCode.from_char("~", vk=50)):
+        listener.on_press(key, False)
+    assert fired == ["snip"]
+
+
+def test_mac_keycodes_cover_shifted_characters():
+    from sniplens import hotkey, paths
+
+    if not paths.IS_MAC:
+        pytest.skip("reads the macOS keyboard layout")
+    keycodes = hotkey._mac_keycodes()
+    assert keycodes["~"] == keycodes["`"]

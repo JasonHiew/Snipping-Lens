@@ -64,7 +64,7 @@ Check [Releases](https://github.com/RisPNG/Snipping-Lens/releases) for the lates
 
 **macOS:**
 
-- Click the menu bar icon and choose "Snip", or use the configured hotkey (default: Alt/Option + Ctrl + \\).
+- Click the menu bar icon and choose "Snip", or use the configured hotkey (default: Option + Ctrl + \\). Screenshots taken with macOS's own shortcuts (Cmd+Shift+3/4/5) are not picked up.
 - macOS's own region selector appears (the same one as Cmd+Shift+4); press Space to pick a window, or Esc to cancel.
 - The captured screenshot is also copied to your clipboard.
 - Snipping Lens lives only in the menu bar, with no Dock icon.
@@ -95,8 +95,9 @@ Check [Releases](https://github.com/RisPNG/Snipping-Lens/releases) for the lates
 
 - macOS 13 Ventura or later, on Apple Silicon or Intel.
 - **Screen Recording** permission (System Settings > Privacy & Security > Screen & System Audio Recording). macOS asks on your first snip; quit and reopen Snipping Lens after allowing it.
-- **Accessibility** permission, only if you use the global hotkey.
+- **Input Monitoring** permission (System Settings > Privacy & Security > Input Monitoring), only if you use the global hotkey. Snipping Lens opens that page when the permission is missing; macOS may not list the app there by itself, so add it with **+** (or drag `~/Applications/Snipping Lens.app` into the list), switch it on, then quit and reopen Snipping Lens.
 - No Apple developer account or signing is needed: the setup script builds `~/Applications/Snipping Lens.app` on your Mac, so Gatekeeper does not block it.
+- Optional: macOS ties the permissions to the app's signature, and without a certificate it signs each build separately, so an update that rebuilds the app (a Python upgrade, or moving the Snipping Lens folder) makes you grant them again. To keep them across rebuilds, answer yes when `setup_mac.sh` offers to create a self-signed `Snipping Lens Signing` certificate in your login keychain, or create it yourself later: open Keychain Access, choose **Keychain Access > Certificate Assistant > Create a Certificate**, name it `Snipping Lens Signing`, set **Identity Type** to *Self-Signed Root* and **Certificate Type** to *Code Signing* (tick *Let me override defaults* to give it a validity longer than a year), then quit and reopen Snipping Lens. If macOS asks whether codesign may use the key, choose **Always Allow**. A valid Apple Development certificate works too. The first launch with the certificate re-signs the app, so grant the permissions one last time. Whenever the app's signature changes, Snipping Lens clears its old permission entries itself, since macOS would otherwise keep listing them as switched on although they no longer apply.
 
 ## FAQ
 

@@ -2,9 +2,9 @@
 
 set -euo pipefail
 
-# --hidden: launched by the Snipping Lens.app bundle (or the login item), so
-# there is no terminal to write to; without it this is the first-time setup a
-# user runs from Terminal.
+# --hidden: run by the Snipping Lens.app bundle as it starts, so there is no
+# terminal to write to; without it this is the first-time setup a user runs
+# from Terminal, which then opens the bundle.
 HIDDEN=false
 if [[ "${1:-}" == "--hidden" ]]; then
     HIDDEN=true
@@ -91,19 +91,88 @@ else
     echo "Dependencies are up to date (skipping pip install)"
 fi
 
-if [ "$HIDDEN" = true ]; then
-    exec "$PYTHON" src/main.py
+APP_BUNDLE="$HOME/Applications/Snipping Lens.app"
+# the name sniplens.shortcuts looks for when it signs the bundle
+SIGNING_CERTIFICATE="Snipping Lens Signing"
+
+# macOS ties the permissions it grants to the bundle's signature. Signed
+# ad-hoc, every rebuild loses them; signed with a certificate, they last. So
+# the first-time setup offers to create a self-signed one, which goes into the
+# user's login keychain and therefore only on a yes.
+offer_signing_certificate() {
+    # grep reads to the end: -q would stop early and, under pipefail, the
+    # cut-off security call would read as no certificate
+    if security find-identity -p codesigning 2>/dev/null | grep -F "\"$SIGNING_CERTIFICATE\"" >/dev/null; then
+        return
+    fi
+    if [ ! -t 0 ]; then
+        return
+    fi
+    echo
+    echo "Optional: create a \"$SIGNING_CERTIFICATE\" certificate in your login keychain?"
+    echo "  It lets macOS keep the Screen Recording and Input Monitoring permissions"
+    echo "  when Snipping Lens is rebuilt (a Python update, or moving this folder)."
+    echo "  It is self-signed, never leaves this Mac, and can be deleted in Keychain Access."
+    read -r -p "Create it? [y/N] " answer
+    case "$answer" in
+        [yY]*) ;;
+        *)
+            echo "Skipped; the readme explains how to create it later."
+            return
+            ;;
+    esac
+    # the system's LibreSSL, not a Homebrew OpenSSL 3+ earlier on the PATH:
+    # security cannot read the newer .p12 format those write, and reports it
+    # as a wrong password
+    local openssl=/usr/bin/openssl cert_dir password
+    cert_dir="$(mktemp -d -t sniplens-cert)"
+    password="$("$openssl" rand -hex 16)"
+    cat > "$cert_dir/cert.cnf" <<EOF_CNF
+[req]
+distinguished_name = dn
+x509_extensions = ext
+prompt = no
+[dn]
+CN = $SIGNING_CERTIFICATE
+[ext]
+basicConstraints = critical, CA:false
+keyUsage = critical, digitalSignature
+extendedKeyUsage = critical, codeSigning
+EOF_CNF
+    if "$openssl" req -x509 -newkey rsa:2048 -nodes -days 3650 -config "$cert_dir/cert.cnf" \
+            -keyout "$cert_dir/key.pem" -out "$cert_dir/cert.pem" 2>/dev/null \
+        && "$openssl" pkcs12 -export -inkey "$cert_dir/key.pem" -in "$cert_dir/cert.pem" \
+            -name "$SIGNING_CERTIFICATE" -passout "pass:$password" -out "$cert_dir/identity.p12" \
+        && security import "$cert_dir/identity.p12" -k "$HOME/Library/Keychains/login.keychain-db" \
+            -P "$password" -T /usr/bin/codesign; then
+        echo "Created. If macOS asks whether codesign may use the key, choose Always Allow."
+    else
+        echo "Could not create the certificate; Snipping Lens will sign itself ad-hoc instead."
+    fi
+    rm -f "$cert_dir/cert.cnf" "$cert_dir/key.pem" "$cert_dir/cert.pem" "$cert_dir/identity.p12"
+    rmdir "$cert_dir"
+}
+
+if [ "$HIDDEN" = false ]; then
+    offer_signing_certificate
 fi
 
-# First-time setup from Terminal: hand the app over to the launcher bundle, so
-# macOS asks for Screen Recording on behalf of "Snipping Lens", not Terminal.
+# keeps the bundle, and its copy of Python, in step with this install
 PYTHONPATH=src "$PYTHON" -c "from sniplens.shortcuts import ensure_app_bundle; ensure_app_bundle()"
-open "$HOME/Applications/Snipping Lens.app"
+
+if [ "$HIDDEN" = true ]; then
+    # run by the bundle as it starts, which then goes on to run the app itself
+    exit 0
+fi
+
+# First-time setup from Terminal: hand the app over to the bundle, so macOS
+# asks for Screen Recording on behalf of "Snipping Lens", not Terminal.
+open "$APP_BUNDLE"
 echo
 echo "Snipping Lens is starting in the menu bar."
 echo "  - macOS will ask for Screen Recording access on your first snip. After"
 echo "    allowing it, quit Snipping Lens from the menu bar and reopen it from"
 echo "    ~/Applications or Spotlight."
-echo "  - Global hotkeys also need Accessibility access (System Settings >"
-echo "    Privacy & Security > Accessibility)."
+echo "  - Global hotkeys also need Input Monitoring access (System Settings >"
+echo "    Privacy & Security > Input Monitoring)."
 echo "You can close this Terminal window."

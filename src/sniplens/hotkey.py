@@ -1,5 +1,7 @@
 import logging
 
+from sniplens import paths
+
 try:
     from pynput import keyboard
 
@@ -22,6 +24,25 @@ MODIFIER_TO_PYNPUT = {
     "lwin": "<cmd_l>",
     "win": "<cmd>",
     "meta": "<cmd>",
+    # the macOS names, so a hand-edited settings file can use them too
+    "roption": "<alt_r>",
+    "loption": "<alt_l>",
+    "option": "<alt>",
+    "rcmd": "<cmd_r>",
+    "lcmd": "<cmd_l>",
+    "cmd": "<cmd>",
+}
+
+# The settings spell modifiers the Windows way on every OS; macOS users see
+# them by the names on their keyboard.
+MAC_MODIFIER_LABELS = {
+    "win": "cmd",
+    "lwin": "lcmd",
+    "rwin": "rcmd",
+    "meta": "cmd",
+    "alt": "option",
+    "lalt": "loption",
+    "ralt": "roption",
 }
 
 # pynput reads anything outside angle brackets as a single character, so every
@@ -53,6 +74,12 @@ MODIFIER_NAMES = frozenset(MODIFIER_TO_PYNPUT)
 KEY_NAMES = frozenset(NAMED_KEY_TO_PYNPUT)
 
 
+def display_hotkey(hotkey):
+    if not paths.IS_MAC:
+        return hotkey
+    return "+".join(MAC_MODIFIER_LABELS.get(part, part) for part in hotkey.split("+"))
+
+
 def to_pynput_hotkey(hotkey):
     parts = []
     for part in hotkey.split("+"):
@@ -61,6 +88,27 @@ def to_pynput_hotkey(hotkey):
             MODIFIER_TO_PYNPUT.get(part) or NAMED_KEY_TO_PYNPUT.get(part, part)
         )
     return "+".join(parts)
+
+
+# UCKeyTranslate's modifier state for Shift
+_MAC_SHIFT_STATE = 2
+
+
+def _mac_keycodes():
+    """Maps each character of the current keyboard layout to its key code. The
+    settings window records a key as the character it typed, so Cmd+Shift+`
+    arrives as "~"; the shifted characters are included, and the unshifted
+    ones win where both exist."""
+    from pynput._util.darwin import keycode_context, keycode_to_string
+
+    keycodes = {}
+    with keycode_context() as context:
+        for state in (_MAC_SHIFT_STATE, 0):
+            for keycode in range(128):
+                char = keycode_to_string(context, keycode, state)
+                if char:
+                    keycodes[char.lower()] = keycode
+    return keycodes
 
 
 class HotkeyController:
@@ -77,6 +125,7 @@ class HotkeyController:
         self._listener = None
         self._bindings = []
         self._current = ()
+        self._keycodes = {}
 
     def reconfigure(self, hotkeys):
         """`hotkeys` maps a hotkey in the settings format to its callback. The
@@ -90,8 +139,13 @@ class HotkeyController:
             logging.info("[Hotkey] No hotkeys to listen for.")
             return
         try:
+            if paths.IS_MAC:
+                self._keycodes = _mac_keycodes()
             self._bindings = [
-                keyboard.HotKey(keyboard.HotKey.parse(to_pynput_hotkey(hotkey)), callback)
+                keyboard.HotKey(
+                    [self._physical(key) for key in keyboard.HotKey.parse(to_pynput_hotkey(hotkey))],
+                    callback,
+                )
                 for hotkey, callback in hotkeys.items()
             ]
             self._listener = keyboard.Listener(on_press=self._on_press, on_release=self._on_release)
@@ -108,14 +162,28 @@ class HotkeyController:
         self._current = ()
 
     def _on_press(self, key):
-        key = self._listener.canonical(key)
+        key = self._physical(key)
         for binding in self._bindings:
             binding.press(key)
 
     def _on_release(self, key):
-        key = self._listener.canonical(key)
+        key = self._physical(key)
         for binding in self._bindings:
             binding.release(key)
+
+    def _physical(self, key):
+        """On macOS pynput names a key by the character it types, and Option or
+        Shift change that character (Option+\\ types «), so a hotkey holding
+        them would never match. There keys are compared by key code instead."""
+        if paths.IS_MAC and isinstance(key, keyboard.KeyCode):
+            vk = key.vk
+            if vk is None and key.char is not None:
+                vk = self._keycodes.get(key.char.lower())
+            if vk is not None:
+                return keyboard.KeyCode.from_vk(vk)
+        if self._listener is None:
+            return key
+        return self._listener.canonical(key)
 
     def _stop_listener(self):
         if self._listener is not None:

@@ -16,18 +16,33 @@ if paths.IS_WINDOWS:
     LNK_ARGUMENTS = f'"{paths.MAIN_SCRIPT}"'
 elif paths.IS_MAC:
     import plistlib
-    import shlex
+    import re
+    import shutil
     import subprocess
+    import sys
 
     # Every launch goes through this bundle so macOS attributes the Screen
-    # Recording and Accessibility permissions to "Snipping Lens" rather than to
+    # Recording and Input Monitoring permissions to "Snipping Lens" rather than to
     # Terminal or a bare python binary. It is built locally, so it carries no
     # quarantine flag and Gatekeeper never asks for a signature.
     APP_BUNDLE = os.path.expanduser(f"~/Applications/{APP_NAME}.app")
     BUNDLE_ID = "com.snippinglens.app"
     BUNDLE_EXECUTABLE = "snipping-lens"
+    # The bundle's executable is a copy of the Python interpreter itself.
+    # macOS tracks a launched app by its pid and an exec count, so a launcher
+    # script that execs Python leaves a process the menu bar and the privacy
+    # prompts cannot match to Snipping Lens: the icon is never placed and no
+    # permission is ever asked for. The interpreter is statically linked, so
+    # the copy needs only to be told where the stdlib and the venv are.
+    PYTHON_LIB = f"python{sys.version_info.major}.{sys.version_info.minor}"
+    VENV_SITE_PACKAGES = os.path.join(paths.VENV_DIR, "lib", PYTHON_LIB, "site-packages")
     SETUP_SCRIPT = os.path.join(paths.ROOT, "setup_mac.sh")
     LAUNCH_AGENT_FILE = os.path.expanduser(f"~/Library/LaunchAgents/{BUNDLE_ID}.plist")
+    # a self-signed code signing certificate the user can create in Keychain
+    # Access, so permissions survive the bundle being re-signed
+    SIGNING_CERTIFICATE = "Snipping Lens Signing"
+    # what the app asks macOS for; Accessibility was asked for by older builds
+    TCC_SERVICES = ("ScreenCapture", "ListenEvent", "Accessibility")
 
     INFO_PLIST = plistlib.dumps(
         {
@@ -42,9 +57,27 @@ elif paths.IS_MAC:
             "LSUIElement": True,
         }
     )
-    # the setup script is re-run on every launch so a dependency change is
-    # installed before the app starts, as on Linux
-    BUNDLE_LAUNCHER = f"#!/bin/bash\nexec /bin/bash {shlex.quote(SETUP_SCRIPT)} --hidden\n"
+    # macOS starts the bundle with no arguments, which would leave Python
+    # reading a program from stdin. This hook runs the setup script so a
+    # dependency change is installed before the app starts, as on Linux, then
+    # hands Python main.py as that stdin program. The config window, started
+    # with a script, skips it. It is an import line of a .pth file, which
+    # site runs as is, rather than a module: Python would cache a module's
+    # bytecode inside the bundle, breaking its signature, and with it the
+    # permissions macOS granted.
+    BUNDLE_BOOT = f'''
+import subprocess
+subprocess.run(["/bin/bash", {SETUP_SCRIPT!r}, "--hidden"], stdin=subprocess.DEVNULL)
+os.chdir({paths.ROOT!r})
+sys.path.insert(0, {paths.SRC_DIR!r})
+main = os.open({paths.MAIN_SCRIPT!r}, os.O_RDONLY)
+os.dup2(main, 0)
+os.close(main)
+'''
+    BUNDLE_PTH = (
+        f"{VENV_SITE_PACKAGES}\n"
+        f"import os, sys; exec({BUNDLE_BOOT!r}) if len(sys.orig_argv) == 1 else None\n"
+    )
     LAUNCH_AGENT_CONTENT = plistlib.dumps(
         {
             "Label": BUNDLE_ID,
@@ -168,12 +201,6 @@ elif paths.IS_MAC:
         after the folder is moved. setup_mac.sh calls this on first install."""
         contents = os.path.join(APP_BUNDLE, "Contents")
         _write_file(os.path.join(contents, "Info.plist"), INFO_PLIST)
-        launcher = os.path.join(contents, "MacOS", BUNDLE_EXECUTABLE)
-        _write_file(launcher, BUNDLE_LAUNCHER.encode())
-        try:
-            os.chmod(launcher, 0o755)
-        except OSError as e:
-            logging.error("Failed to make %s executable: %s", launcher, e)
         icon = os.path.join(contents, "Resources", "sniplens.icns")
         if not os.path.exists(icon):
             os.makedirs(os.path.dirname(icon), exist_ok=True)
@@ -184,6 +211,120 @@ elif paths.IS_MAC:
             )
             if result.returncode != 0:
                 logging.warning("Could not build the app icon: %s", result.stderr.decode(errors="replace"))
+        _ensure_bundle_python(contents)
+        _ensure_signed()
+
+    def _ensure_signed():
+        """macOS neither asks for privacy permissions nor shows the menu bar icon
+        of an unsigned app, and it ties the permissions it grants to the
+        signature. An ad-hoc one needs no developer account but is the exact
+        build, so every re-sign makes macOS forget them; one made with a
+        certificate keeps them, since macOS then checks the certificate and
+        the bundle ID instead. So the bundle is signed with a certificate when
+        the keychain has one, and only re-signed when a file above broke the
+        signature or a certificate has become available."""
+        identity, name = _signing_identity()
+        verify = subprocess.run(
+            ["/usr/bin/codesign", "--verify", "--deep", "--strict", APP_BUNDLE],
+            capture_output=True,
+        )
+        if verify.returncode == 0 and (identity == "-" or _signed_by(name)):
+            return
+        previous = _designated_requirement()
+        result = subprocess.run(
+            ["/usr/bin/codesign", "--force", "--deep", "--sign", identity, APP_BUNDLE],
+            capture_output=True,
+        )
+        if result.returncode == 0:
+            logging.info("Signed the app bundle with %s.", name)
+        else:
+            logging.warning("Could not sign the app bundle with %s: %s", name, result.stderr.decode(errors="replace"))
+            if identity != "-" and verify.returncode != 0:
+                subprocess.run(
+                    ["/usr/bin/codesign", "--force", "--deep", "--sign", "-", APP_BUNDLE],
+                    capture_output=True,
+                )
+        if previous is not None and _designated_requirement() != previous:
+            _forget_permissions()
+
+    def _designated_requirement():
+        result = subprocess.run(["/usr/bin/codesign", "-d", "-r-", APP_BUNDLE], capture_output=True)
+        for line in result.stdout.decode(errors="replace").splitlines():
+            if line.startswith("designated =>"):
+                return line
+        return None
+
+    def _forget_permissions():
+        """The permissions macOS granted belong to the old signature, and it
+        keeps listing them, switched on, though they no longer apply: the app
+        looks allowed and is not, until each is removed and added again. They
+        are void anyway, so clearing them leaves macOS to ask afresh."""
+        for service in TCC_SERVICES:
+            subprocess.run(["/usr/bin/tccutil", "reset", service, BUNDLE_ID], capture_output=True)
+        logging.info("The app's signature changed; its old permissions were cleared.")
+
+    def _signing_identity():
+        """(codesign identity, name) for the certificate to sign with: one named
+        SIGNING_CERTIFICATE, self-signed so never "valid" to macOS, else a valid
+        Apple Development one, else an ad-hoc signature."""
+        result = subprocess.run(
+            ["/usr/bin/security", "find-identity", "-p", "codesigning"],
+            capture_output=True,
+        )
+        identities = []
+        for line in result.stdout.decode(errors="replace").splitlines():
+            match = re.match(r'\s*\d+\) ([0-9A-F]{40}) "([^"]+)"\s*(\(.*\))?', line)
+            if match:
+                identities.append(match.groups())
+        for sha1, name, status in identities:
+            if name == SIGNING_CERTIFICATE and "EXPIRED" not in (status or ""):
+                return sha1, name
+        for sha1, name, status in identities:
+            if name.startswith("Apple Development:") and not status:
+                return sha1, name
+        return "-", "an ad-hoc signature"
+
+    def _signed_by(name):
+        result = subprocess.run(["/usr/bin/codesign", "-dvv", APP_BUNDLE], capture_output=True)
+        return f"Authority={name}" in result.stderr.decode(errors="replace").splitlines()
+
+    def _ensure_bundle_python(contents):
+        base_python = os.path.realpath(os.path.join(paths.VENV_DIR, "bin", "python"))
+        if not os.path.isfile(base_python):
+            logging.warning("No Python at %s to copy into the app bundle.", base_python)
+            return
+        bundle_python = os.path.join(contents, "MacOS", BUNDLE_EXECUTABLE)
+        # signing rewrites the copy, so it never matches the original again;
+        # the stamp records which interpreter it was made from instead
+        stamp_path = os.path.join(contents, "Resources", "python-source")
+        source = os.stat(base_python)
+        stamp = f"{base_python}\n{source.st_size} {source.st_mtime_ns}\n".encode()
+        try:
+            with open(stamp_path, "rb") as f:
+                current = f.read() == stamp
+        except OSError:
+            current = False
+        if not current or not os.path.exists(bundle_python):
+            try:
+                # copied aside and renamed, since the running app may be this
+                # very file and rewriting it in place would crash it
+                staged = bundle_python + ".new"
+                os.makedirs(os.path.dirname(bundle_python), exist_ok=True)
+                shutil.copy2(base_python, staged)
+                os.replace(staged, bundle_python)
+            except OSError as e:
+                logging.error("Failed to copy Python into the app bundle: %s", e)
+                return
+            _write_file(stamp_path, stamp)
+        # a pyvenv.cfg beside Contents/MacOS points the copy at the stdlib, and
+        # the .pth adds the venv's packages, so the config window, started
+        # with sys.executable, finds them too; the .pth also boots the app
+        _write_file(
+            os.path.join(contents, "pyvenv.cfg"),
+            f"home = {os.path.dirname(base_python)}\ninclude-system-site-packages = false\n".encode(),
+        )
+        site_packages = os.path.join(contents, "lib", PYTHON_LIB, "site-packages")
+        _write_file(os.path.join(site_packages, "sniplens.pth"), BUNDLE_PTH.encode())
 
     def _write_file(path, content):
         try:

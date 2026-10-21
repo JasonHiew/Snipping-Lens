@@ -8,7 +8,7 @@ import uuid
 import flet as ft
 
 from sniplens import APP_NAME, paths, theme
-from sniplens.hotkey import MODIFIER_NAMES
+from sniplens.hotkey import MODIFIER_NAMES, display_hotkey
 from sniplens.logging_setup import setup_logging
 from sniplens.settings import DEFAULT_CLIPBOARD_SITES, SEARCH_TERM_PLACEHOLDER, SettingsStore
 from sniplens.shortcuts import set_app_menu, set_startup
@@ -161,10 +161,10 @@ def build_config_window(page: ft.Page):
 
     def refresh_hotkey_field():
         if is_capturing_hotkey[0]:
-            hotkey_field.value = format_hotkey(captured_keys) or "Recording keys..."
-            hotkey_field.helper = "Press ENTER to save, and ESC to cancel."
+            hotkey_field.value = display_hotkey(format_hotkey(captured_keys)) or "Recording keys..."
+            hotkey_field.helper = "ENTER saves (with no keys, clears it), ESC cancels."
         else:
-            hotkey_field.value = settings["alternate_hotkey"]
+            hotkey_field.value = display_hotkey(settings["alternate_hotkey"])
             hotkey_field.helper = "Click to capture new hotkey."
         page.update()
 
@@ -180,15 +180,16 @@ def build_config_window(page: ft.Page):
         if e.key == "Escape":
             is_capturing_hotkey[0] = False
             captured_keys.clear()
-            save({"alternate_hotkey": ""})
-            logging.info("Alternate hotkey cleared.")
             refresh_hotkey_field()
             return
         if e.key == "Enter":
             is_capturing_hotkey[0] = False
             save({"alternate_hotkey": format_hotkey(captured_keys)})
             captured_keys.clear()
-            logging.info("Alternate hotkey updated to: '%s'", settings["alternate_hotkey"])
+            if settings["alternate_hotkey"]:
+                logging.info("Alternate hotkey updated to: '%s'", display_hotkey(settings["alternate_hotkey"]))
+            else:
+                logging.info("Alternate hotkey cleared.")
             refresh_hotkey_field()
             return
 
@@ -213,7 +214,7 @@ def build_config_window(page: ft.Page):
 
     hotkey_field = ft.TextField(
         hint_text="Click to capture hotkey",
-        value=settings["alternate_hotkey"],
+        value=display_hotkey(settings["alternate_hotkey"]),
         read_only=True,
         on_click=on_hotkey_field_click,
         width=300,
