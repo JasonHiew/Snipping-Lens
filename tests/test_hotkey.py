@@ -1,3 +1,5 @@
+import re
+
 import pytest
 from pynput import keyboard
 
@@ -33,14 +35,30 @@ def test_unknown_single_character_passes_through():
     assert to_pynput_hotkey("ctrl+\\") == "<ctrl>+\\"
 
 
+def skip_keys_this_platform_lacks(pynput_hotkey):
+    """pynput only defines the keys its platform has: macOS has no Insert,
+    Menu, Pause or Print Screen."""
+    missing = [
+        name
+        for name in re.findall(r"<(\w+)>", pynput_hotkey)
+        if not hasattr(keyboard.Key, name)
+    ]
+    if missing:
+        pytest.skip(f"pynput on this platform has no {', '.join(missing)} key")
+
+
 @pytest.mark.parametrize("name", sorted(NAMED_KEY_TO_PYNPUT))
 def test_every_named_key_is_accepted_by_pynput(name):
-    keyboard.HotKey.parse(to_pynput_hotkey(f"ctrl+{name}"))
+    hotkey = to_pynput_hotkey(f"ctrl+{name}")
+    skip_keys_this_platform_lacks(hotkey)
+    keyboard.HotKey.parse(hotkey)
 
 
 @pytest.mark.parametrize("hotkey", ["win+shift+s", "printscreen", "alt+ctrl+\\"])
 def test_system_and_default_hotkeys_are_accepted_by_pynput(hotkey):
-    keyboard.HotKey.parse(to_pynput_hotkey(hotkey))
+    hotkey = to_pynput_hotkey(hotkey)
+    skip_keys_this_platform_lacks(hotkey)
+    keyboard.HotKey.parse(hotkey)
 
 
 def test_injected_key_events_fire_hotkeys(monkeypatch):
