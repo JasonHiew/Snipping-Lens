@@ -94,10 +94,16 @@ DEFAULT_SETTINGS = {k: v["value"] for k, v in DEFAULT_SETTINGS_WRAPPED.items()}
 DEFAULT_CLIPBOARD_SITES = [
     {
         "id": "jpdb",
-        "name": "JPDB",
+        "name": "JP",
         "url": "https://jpdb.io/search?q=<search_term>",
         "enabled": True,
-    }
+    },
+    {
+        "id": "trainchinese",
+        "name": "ZH",
+        "url": "https://trainchinese.com/v2/search.php?searchWord=<search_term>",
+        "enabled": True,
+    },
 ]
 
 
