@@ -1,6 +1,6 @@
 import logging
 
-from PySide6.QtGui import QCursor, QIcon
+from PySide6.QtGui import QActionGroup, QCursor, QIcon
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
 from sniplens import APP_NAME, theme
@@ -44,6 +44,13 @@ class TrayController:
             )
         open_action = self.menu.addAction("Open App")
         open_action.triggered.connect(self._commands.open_config_window)
+        self._auto_upload_action = self.menu.addAction("Auto Upload to Google Lens")
+        self._auto_upload_action.setCheckable(True)
+        self._auto_upload_action.triggered.connect(self._commands.set_auto_upload)
+        self._sites_menu = self.menu.addMenu("Default Search Site")
+        self._sites_menu.setStyleSheet(MENU_STYLE)
+        self._sites_group = QActionGroup(self._sites_menu)
+        self.menu.aboutToShow.connect(self._refresh_state)
         self.menu.addSeparator()
         quit_action = self.menu.addAction("Exit")
         quit_action.triggered.connect(self._commands.quit)
@@ -51,6 +58,7 @@ class TrayController:
         # the menu's first realization pays the style polish, window creation
         # and font metrics; pay it here so the first right-click is as fast as
         # every later one instead of stalling for seconds
+        self._refresh_state()
         self.menu.ensurePolished()
         self.menu.winId()
         self.menu.sizeHint()
@@ -66,6 +74,27 @@ class TrayController:
         self.tray_icon.hide()
         self.tray_icon.deleteLater()
         self.menu.deleteLater()
+
+    def _refresh_state(self):
+        """The menu mirrors settings the config window can also change, so it
+        is re-read from the controller every time the menu opens."""
+        self._auto_upload_action.setChecked(self._commands.auto_upload_enabled)
+        for action in self._sites_group.actions():
+            self._sites_group.removeAction(action)
+        self._sites_menu.clear()
+        enabled = [site for site in self._commands.clipboard_sites if site["enabled"]]
+        if not enabled:
+            self._sites_menu.addAction("No sites configured").setEnabled(False)
+            return
+        for site in enabled:
+            # menu-owned like the other actions, so Python never collects them
+            action = self._sites_menu.addAction(site["name"])
+            action.setCheckable(True)
+            action.setChecked(site["id"] == self._commands.default_clipboard_site_id)
+            action.triggered.connect(
+                lambda _checked, site_id=site["id"]: self._commands.set_default_site(site_id)
+            )
+            self._sites_group.addAction(action)
 
     def _on_activated(self, reason):
         if reason != QSystemTrayIcon.ActivationReason.Trigger:

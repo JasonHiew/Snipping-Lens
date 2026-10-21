@@ -15,6 +15,18 @@ PAUSED = 0
 TRAY_ONLY = 1
 ALWAYS_ON = 2
 
+# the placeholder a search site's URL template has substituted with copied text
+SEARCH_TERM_PLACEHOLDER = "<search_term>"
+
+DEFAULT_CLIPBOARD_SITES = [
+    {
+        "id": "jpdb",
+        "name": "JPDB",
+        "url": f"https://jpdb.io/search?q={SEARCH_TERM_PLACEHOLDER}",
+        "enabled": True,
+    }
+]
+
 DEFAULT_SETTINGS = {
     "tray_status": {
         "value": ALWAYS_ON,
@@ -36,6 +48,18 @@ DEFAULT_SETTINGS = {
         "value": "",
         "description": "MD5 of the last clipboard image that was searched.",
     },
+    "auto_upload_enabled": {
+        "value": True,
+        "description": "Automatically upload snips and open Google Lens",
+    },
+    "clipboard_sites": {
+        "value": DEFAULT_CLIPBOARD_SITES,
+        "description": f"Websites that can be opened with copied text. Use {SEARCH_TERM_PLACEHOLDER} as the placeholder.",
+    },
+    "default_clipboard_site_id": {
+        "value": DEFAULT_CLIPBOARD_SITES[0]["id"],
+        "description": "ID of the site opened automatically when clipboard text changes after a Lens search.",
+    },
 }
 if not paths.IS_WINDOWS:
     DEFAULT_SETTINGS["app_menu"] = {
@@ -49,10 +73,22 @@ def _coerce(key, value):
         return int(value)
     if key == "alternate_hotkey":
         return str(value).strip()
-    if key == "alternate_hotkey_bypass":
+    if key in ("alternate_hotkey_bypass", "auto_upload_enabled"):
         if isinstance(value, str):
             return value.lower() in ("true", "1", "yes", "on")
         return bool(value)
+    if key == "clipboard_sites":
+        return [
+            {
+                "id": str(site["id"]),
+                "name": str(site.get("name") or site["url"]),
+                "url": str(site["url"]),
+                "enabled": bool(site.get("enabled", True)),
+            }
+            for site in value
+        ]
+    if key == "default_clipboard_site_id":
+        return str(value)
     return value
 
 
@@ -63,8 +99,16 @@ def _valid(key, value):
         return isinstance(value, (int, str)) and str(value).strip("-").isdigit() and int(value) in (0, 1)
     if key == "alternate_hotkey":
         return isinstance(value, str)
-    if key == "alternate_hotkey_bypass":
+    if key in ("alternate_hotkey_bypass", "auto_upload_enabled"):
         return isinstance(value, (bool, str, int))
+    if key == "clipboard_sites":
+        return (
+            isinstance(value, list)
+            and len(value) > 0
+            and all(isinstance(site, dict) and site.get("id") and site.get("url") for site in value)
+        )
+    if key == "default_clipboard_site_id":
+        return isinstance(value, str)
     return True
 
 

@@ -1,9 +1,12 @@
+import faulthandler
 import logging
 import os
 import sys
 import threading
 
 from sniplens import paths
+
+_crash_log = None
 
 # libraries that narrate their own progress at INFO; the config window shows
 # the tail of this log to the user, so only their warnings belong in it
@@ -44,3 +47,9 @@ def setup_logging():
     # crash would otherwise leave nothing behind
     sys.excepthook = _log_unhandled_exception
     threading.excepthook = _log_unhandled_thread_exception
+    # a native crash (e.g. heap corruption in a C extension) ends the process
+    # before logging runs; faulthandler still dumps every thread's stack. The
+    # file stays open for the life of the process, as faulthandler requires.
+    global _crash_log
+    _crash_log = open(os.path.join(paths.LOGS_DIR, "crash.log"), "a")
+    faulthandler.enable(file=_crash_log, all_threads=True)

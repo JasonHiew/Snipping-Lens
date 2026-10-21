@@ -17,6 +17,7 @@ from sniplens.hotkey import HotkeyController
 from sniplens.images import image_hash, png_bytes
 from sniplens.lens import GOOGLE_LENS_URL, LensSearchService
 from sniplens.logging_setup import setup_logging
+from sniplens.search_sites import ClipboardSiteWatcher
 from sniplens.settings import ALWAYS_ON, PAUSED, TRAY_ONLY, SettingsStore
 from sniplens.shortcuts import ensure_integration_entries
 from sniplens.tray import TrayController
@@ -63,9 +64,25 @@ class ApplicationCore:
     def last_detected_image(self):
         return self.values.get("last_detected_image", "")
 
+    @property
+    def auto_upload_enabled(self):
+        return bool(self.values.get("auto_upload_enabled", True))
+
+    @property
+    def clipboard_sites(self):
+        return self.values.get("clipboard_sites", [])
+
+    @property
+    def default_clipboard_site_id(self):
+        return self.values.get("default_clipboard_site_id", "")
+
     def remember_detected_image(self, digest):
         self.values["last_detected_image"] = digest
         self.store.save({"last_detected_image": digest})
+
+    def update(self, updates):
+        self.values.update(updates)
+        self.store.save(updates)
 
 
 class ApplicationController(QObject):
@@ -86,6 +103,7 @@ class ApplicationController(QObject):
         self._snipRequested.connect(self._handle_snip_request)
         self._systemSnipDetected.connect(self._handle_system_snip)
         self._tray = None
+        self._site_watcher = ClipboardSiteWatcher(core, self)
         self._hotkey = HotkeyController()
         self._watcher = QFileSystemWatcher(self)
         self._watcher.directoryChanged.connect(self._on_settings_dir_changed)
@@ -118,6 +136,28 @@ class ApplicationController(QObject):
     def notify_system_snip(self):
         self._systemSnipDetected.emit()
 
+    @property
+    def auto_upload_enabled(self):
+        return self._core.auto_upload_enabled
+
+    @property
+    def clipboard_sites(self):
+        return self._core.clipboard_sites
+
+    @property
+    def default_clipboard_site_id(self):
+        return self._core.default_clipboard_site_id
+
+    def set_auto_upload(self, enabled):
+        self._core.update({"auto_upload_enabled": enabled})
+        logging.info(
+            "Auto upload to Google Lens %s via tray menu.", "enabled" if enabled else "disabled"
+        )
+
+    def set_default_site(self, site_id):
+        self._core.update({"default_clipboard_site_id": site_id})
+        logging.info("Default clipboard search site set to: %s", site_id)
+
     def open_config_window(self):
         if self._config_process is not None and self._config_process.poll() is None:
             logging.info("Config window already running.")
@@ -136,6 +176,7 @@ class ApplicationController(QObject):
         logging.info("Shutting down %s.", APP_NAME)
         self._watcher.removePaths(self._watcher.files() + self._watcher.directories())
         self._hotkey.stop()
+        self._site_watcher.stop()
         self._capture.stop()
         self._lens.stop()
         if self._config_process is not None:
@@ -206,6 +247,8 @@ class ApplicationController(QObject):
             logging.info("[Snip] Search skipped by the activation mode.")
 
     def _should_search(self, from_app_trigger):
+        if not self._core.auto_upload_enabled:
+            return False
         status = self._core.tray_status
         return status == ALWAYS_ON or (status == TRAY_ONLY and from_app_trigger)
 
@@ -213,6 +256,7 @@ class ApplicationController(QObject):
         lens_url = GOOGLE_LENS_URL.format(url)
         logging.info("[Google Lens] Opening: %s", lens_url)
         webbrowser.open_new_tab(lens_url)
+        self._site_watcher.arm()
 
     def _on_settings_dir_changed(self, _path):
         if os.path.exists(paths.SETTINGS_PATH) and paths.SETTINGS_PATH not in self._watcher.files():

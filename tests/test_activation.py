@@ -10,7 +10,12 @@ def controller(**core):
     """A controller with only the attributes the policy methods read. The Qt
     base class is deliberately left uninitialised - these methods touch nothing
     but plain Python state."""
-    values = {"tray_status": ALWAYS_ON, "alternate_hotkey": "", "alternate_hotkey_bypass": True}
+    values = {
+        "tray_status": ALWAYS_ON,
+        "alternate_hotkey": "",
+        "alternate_hotkey_bypass": True,
+        "auto_upload_enabled": True,
+    }
     values.update(core)
     instance = ApplicationController.__new__(ApplicationController)
     instance._core = SimpleNamespace(**values)
@@ -30,6 +35,13 @@ def controller(**core):
 )
 def test_search_policy(status, from_app_trigger, expected):
     assert controller(tray_status=status)._should_search(from_app_trigger) is expected
+
+
+@pytest.mark.parametrize("status", [TRAY_ONLY, ALWAYS_ON])
+def test_auto_upload_off_skips_every_search(status):
+    instance = controller(tray_status=status, auto_upload_enabled=False)
+    assert instance._should_search(True) is False
+    assert instance._should_search(False) is False
 
 
 def test_no_hotkeys_when_none_configured(monkeypatch):

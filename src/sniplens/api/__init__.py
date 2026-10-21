@@ -8,6 +8,7 @@ from sniplens.api.errors import (
     ApiTransportError,
 )
 from sniplens.api.litterbox import LitterboxClient
+from sniplens.api.uguu import UguuClient
 
 __all__ = [
     "ApiConnectionError",
@@ -18,4 +19,5 @@ __all__ = [
     "ApiTlsError",
     "ApiTransportError",
     "LitterboxClient",
+    "UguuClient",
 ]

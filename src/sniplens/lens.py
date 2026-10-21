@@ -4,13 +4,13 @@ import threading
 
 from PySide6.QtCore import QObject, Signal
 
-from sniplens.api import LitterboxClient
+from sniplens.api import UguuClient
 
 GOOGLE_LENS_URL = "https://lens.google.com/uploadbyurl?url={}"
 
 
 class LensSearchService(QObject):
-    """Uploads a snip to Litterbox and reports the URL to be opened in
+    """Uploads a snip to uguu.se and reports the URL to be opened in
     Google Lens. The HTTP client lives on a dedicated asyncio loop thread so
     the GUI thread never blocks on networking."""
 
@@ -31,7 +31,7 @@ class LensSearchService(QObject):
     def _run_loop(self):
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
-        self._client = LitterboxClient()
+        self._client = UguuClient()
         self._ready.set()
         self._loop.run_forever()
         self._loop.run_until_complete(self._client.aclose())

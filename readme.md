@@ -5,7 +5,11 @@
 <a href="https://github.com/JasonHiew/Snipping-Lens"><img alt="GitHub Last Commit" src="https://img.shields.io/github/last-commit/JasonHiew/Snipping-Lens?style=flat&color=lightyellow"></a>
 </p>
 
-> **Fork modifications:** Images are uploaded to [uguu.se](https://uguu.se) instead of Litterbox. After Google Lens opens, clicking **Copy** on any detected text automatically opens a [jpdb.io](https://jpdb.io) search for that word — useful for Japanese vocabulary lookup.
+> **Fork modifications** (on top of upstream v5):
+>
+> - Images are uploaded to [uguu.se](https://uguu.se) instead of Litterbox.
+> - After Google Lens opens, clicking **Copy** on detected text opens it in your default search site — [jpdb.io](https://jpdb.io) out of the box, useful for Japanese vocabulary lookup. Add or edit sites (e.g. `https://www.trainchinese.com/v2/search.php?searchWord=<search_term>`) in the config window under **Clipboard Search Sites**; `<search_term>` is replaced with the copied text.
+> - The tray menu has an **Auto Upload to Google Lens** toggle and a **Default Search Site** switcher.
 >
 > Original project by [RisPNG](https://github.com/RisPNG/Snipping-Lens).
 
@@ -63,6 +67,8 @@ Check [Releases](https://github.com/RisPNG/Snipping-Lens/releases) for the lates
 - **Right-click** (_and also left-click for Linux_): Show context menu with options:
   - **Snip**: Takes a screenshot (Linux only).
   - **Open App**: Opens Snipping Lens main window.
+  - **Auto Upload to Google Lens**: Turns the upload and Lens search on or off.
+  - **Default Search Site**: Picks which site copied text from Lens opens in.
   - **Exit**: Close the application.
 
 ## Requirements
